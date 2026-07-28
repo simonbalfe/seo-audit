@@ -39,13 +39,15 @@ seoaudit audit https://example.com --limit 2000
 - JSON-LD syntax and discovered schema types
 - Hreflang targets and reciprocal return links
 - Mobile viewport, page language, semantic main content, and mixed-content checks
-- URL casing, underscores, parameters, and excessive length
+- HTML page URL casing, underscores, parameters, and excessive length
 
 ## Boundaries
 
 The audit reports public, observable evidence and labels heuristics as review items. It does not claim access to Google index state, rankings, traffic, keyword demand, backlinks, conversions, Core Web Vitals field data, or AI citations.
 
 The crawler analyses server-returned HTML and automatically uses local Chrome for pages that expose very little raw content. Full raw-versus-rendered comparison on every page and browser performance traces are not yet included.
+
+Deliberate `noindex` directives remain visible in page-level indexability data. They become actionable failures when a non-indexable URL is also submitted in a sitemap.
 
 ## Development
 

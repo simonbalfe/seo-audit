@@ -280,6 +280,9 @@ func analyzeHreflang(report *SiteReport, pages map[string]*PageReport) {
 }
 
 func analyzeURL(report *SiteReport, page PageReport) {
+	if !strings.Contains(strings.ToLower(page.ContentType), "html") {
+		return
+	}
 	parsed, err := url.Parse(page.URL)
 	if err != nil {
 		return

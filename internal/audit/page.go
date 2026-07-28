@@ -379,9 +379,6 @@ func pageFindings(page PageReport) []Finding {
 		} else if len(page.Canonicals) > 1 {
 			add("indexing", "Multiple canonicals", Fail, "high", strings.Join(page.Canonicals, ", "), "Declare one consistent canonical.")
 		}
-		if containsDirective(page.Robots, "noindex") || containsDirective(page.XRobots, "noindex") {
-			add("indexing", "Noindex directive", Warn, "high", strings.TrimSpace(page.Robots+" "+page.XRobots), "Confirm the page should be excluded; otherwise remove noindex.")
-		}
 		if containsDirective(page.Robots, "nofollow") || containsDirective(page.XRobots, "nofollow") {
 			add("indexing", "Nofollow directive", Warn, "medium", strings.TrimSpace(page.Robots+" "+page.XRobots), "Remove nofollow if crawlers should follow links on this page.")
 		}

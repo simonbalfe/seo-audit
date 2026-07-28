@@ -61,6 +61,17 @@ func TestAuditReturnsErrorWhenStartURLCannotBeFetched(t *testing.T) {
 	}
 }
 
+func TestAnalyzeURLIgnoresNonHTMLAssets(t *testing.T) {
+	report := SiteReport{}
+	analyzeURL(&report, PageReport{
+		URL:         "https://example.com/skills/example/SKILL.md",
+		ContentType: "text/markdown",
+	})
+	if len(report.Findings) != 0 {
+		t.Fatalf("expected no URL findings for non-HTML asset, got %#v", report.Findings)
+	}
+}
+
 func writeHTML(writer http.ResponseWriter, title, body string) {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprintf(writer, `<html lang="en"><head><title>%s</title><meta name="description" content="A sufficiently descriptive summary for this useful page and its purpose."><meta name="viewport" content="width=device-width"><link rel="canonical" href=""></head><body><main>%s</main></body></html>`, title, body)

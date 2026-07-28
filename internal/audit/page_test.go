@@ -71,3 +71,31 @@ func TestInspectRobotsEvaluatesAgents(t *testing.T) {
 		t.Fatal("expected Googlebot to be allowed")
 	}
 }
+
+func TestPageFindingsKeepsIntentionalNoindexOutOfActions(t *testing.T) {
+	page := PageReport{
+		URL:         "https://example.com/private",
+		FinalURL:    "https://example.com/private",
+		StatusCode:  http.StatusOK,
+		ContentType: "text/html",
+		Title:       "Private reference page",
+		Titles:      []string{"Private reference page"},
+		Description: "A sufficiently descriptive summary for a deliberately excluded reference page.",
+		Descriptions: []string{
+			"A sufficiently descriptive summary for a deliberately excluded reference page.",
+		},
+		H1:          []string{"Private reference"},
+		Canonicals:  []string{"https://example.com/private"},
+		Canonical:   "https://example.com/private",
+		Robots:      "noindex, follow",
+		Language:    "en",
+		HasViewport: true,
+		HasMain:     true,
+	}
+
+	for _, finding := range pageFindings(page) {
+		if finding.Check == "Noindex directive" {
+			t.Fatal("intentional noindex should remain indexability evidence, not an action")
+		}
+	}
+}

@@ -16,6 +16,8 @@ The public audit follows this priority order:
 - Structured data syntax does not prove Google rich-result eligibility.
 - A sitemap URL is expected to be successful, canonical, and indexable.
 - A URL found only in a sitemap is an orphan candidate, not proof that no link exists anywhere.
+- Deliberate `noindex` directives remain visible in each page's indexability evidence but are not standalone action items. A noindexed sitemap URL is still a failure.
+- Page URL-format heuristics apply to HTML documents, not public assets whose filenames follow an external convention.
 
 ## Public-only limitations
 
