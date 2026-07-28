@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -14,209 +15,135 @@ import (
 )
 
 type options struct {
-	json    bool
-	all     bool
-	timeout time.Duration
+	json          bool
+	timeout       time.Duration
+	limit         int
+	checkExternal bool
 }
 
-type auditReport struct {
-	Page     audit.PageReport    `json:"page"`
-	Robots   audit.RobotsReport  `json:"robots"`
-	Sitemaps audit.SitemapReport `json:"sitemaps"`
+type issueGroup struct {
+	Priority string
+	Category string
+	Check    string
+	Fix      string
+	Items    []audit.Finding
 }
 
 func Execute(ctx context.Context) error {
 	opts := &options{}
 	root := &cobra.Command{
 		Use:           "seoaudit",
-		Short:         "Public website SEO auditor",
+		Short:         "Deep public website SEO auditor",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		CompletionOptions: cobra.CompletionOptions{
+			DisableDefaultCmd: true,
+		},
 	}
-	root.PersistentFlags().BoolVar(&opts.json, "json", false, "print JSON")
-	root.PersistentFlags().BoolVar(&opts.all, "all", false, "show passing checks as well as actions")
-	root.PersistentFlags().DurationVar(&opts.timeout, "timeout", 20*time.Second, "request timeout")
-	root.AddCommand(
-		newAuditCommand(opts),
-		newPageCommand(opts),
-		newRobotsCommand(opts),
-		newSitemapCommand(opts),
-		newRoadmapCommand(),
-	)
+	command := &cobra.Command{
+		Use:   "audit <url>",
+		Short: "Crawl and audit a public website",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			report, err := audit.NewClient(opts.timeout).Audit(command.Context(), args[0], audit.Options{
+				Limit:         opts.limit,
+				CheckExternal: opts.checkExternal,
+			})
+			if err != nil {
+				return err
+			}
+			if opts.json {
+				return printJSON(report)
+			}
+			printReport(report)
+			return nil
+		},
+	}
+	command.Flags().BoolVar(&opts.json, "json", false, "print the complete machine-readable report")
+	command.Flags().DurationVar(&opts.timeout, "timeout", 30*time.Second, "timeout for each request")
+	command.Flags().IntVar(&opts.limit, "limit", 500, "maximum pages to audit")
+	command.Flags().BoolVar(&opts.checkExternal, "external", true, "check discovered external links")
+	root.AddCommand(command)
 	return root.ExecuteContext(ctx)
 }
 
-func newAuditCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "audit <url>",
-		Short: "Run every Stage 1 public check",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(command *cobra.Command, args []string) error {
-			client := audit.NewClient(opts.timeout)
-			page, err := client.InspectPage(command.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			robots, err := client.InspectRobots(command.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			sitemaps, err := client.InspectSitemaps(command.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			report := auditReport{Page: page, Robots: robots, Sitemaps: sitemaps}
-			if opts.json {
-				return printJSON(report)
-			}
-			printPage(page, opts.all)
-			fmt.Println()
-			printRobots(robots)
-			fmt.Println()
-			printSitemaps(sitemaps)
-			return nil
-		},
+func printReport(report audit.SiteReport) {
+	fmt.Printf("SEO audit: %s\n", report.StartURL)
+	fmt.Printf("Crawled: %d URLs (%d indexable, %d non-indexable) in %.1fs\n",
+		report.Summary.Pages,
+		report.Summary.Indexable,
+		report.Summary.NonIndexable,
+		float64(report.Duration)/1000,
+	)
+	fmt.Printf("Discovered: %d internal links, %d external links, %d sitemap URLs\n",
+		report.Summary.InternalLinks,
+		report.Summary.ExternalLinks,
+		report.Summary.SitemapURLs,
+	)
+	fmt.Printf("Actions: %d failures, %d warnings\n", report.Summary.Failures, report.Summary.Warnings)
+	if report.LimitReached {
+		fmt.Println("Warning: crawl limit reached; rerun with a higher --limit for complete coverage.")
 	}
-}
-
-func newPageCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "page <url>",
-		Short: "Inspect one public HTML page",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(command *cobra.Command, args []string) error {
-			report, err := audit.NewClient(opts.timeout).InspectPage(command.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			if opts.json {
-				return printJSON(report)
-			}
-			printPage(report, opts.all)
-			return nil
-		},
-	}
-}
-
-func newRobotsCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "robots <url>",
-		Short: "Check public search and AI crawler access",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(command *cobra.Command, args []string) error {
-			report, err := audit.NewClient(opts.timeout).InspectRobots(command.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			if opts.json {
-				return printJSON(report)
-			}
-			printRobots(report)
-			return nil
-		},
-	}
-}
-
-func newSitemapCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "sitemap <url>",
-		Short: "Discover and read public XML sitemaps",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(command *cobra.Command, args []string) error {
-			report, err := audit.NewClient(opts.timeout).InspectSitemaps(command.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			if opts.json {
-				return printJSON(report)
-			}
-			printSitemaps(report)
-			return nil
-		},
-	}
-}
-
-func newRoadmapCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "roadmap",
-		Short: "Show implemented and planned audit stages",
-		Run: func(command *cobra.Command, args []string) {
-			writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(writer, "STAGE\tSTATUS\tSCOPE")
-			fmt.Fprintln(writer, "1\tbuilt\tSingle page, robots.txt, sitemap discovery")
-			fmt.Fprintln(writer, "2\tplanned\tBounded crawl, redirects, broken links, duplicate metadata")
-			fmt.Fprintln(writer, "3\tplanned\tSite structure, internal links, content inventory")
-			fmt.Fprintln(writer, "4\tplanned\tPublic GEO readability, entities, evidence, freshness")
-			fmt.Fprintln(writer, "5\tplanned\tSaved baselines, change detection, reports")
-			writer.Flush()
-		},
-	}
-}
-
-func printPage(report audit.PageReport, showAll bool) {
-	pass, warnings, failures := findingCounts(report.Findings)
-	fmt.Printf("Page: %s\n", report.URL)
-	if report.FinalURL != report.URL {
-		fmt.Printf("Final URL: %s\n", report.FinalURL)
-	}
-	fmt.Printf("Result: %d failures, %d warnings, %d passes\n", failures, warnings, pass)
-	fmt.Printf("Title: %s\n", valueOr(report.Title, "missing"))
-	fmt.Printf("Content: %d words, %d internal links, %d external links\n", report.WordCount, len(report.InternalLinks), len(report.ExternalLinks))
 	fmt.Println()
+
+	groups := groupFindings(report.Findings)
+	if len(groups) == 0 {
+		fmt.Println("No deterministic issues found in the public crawl.")
+		return
+	}
 	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "STATUS\tAREA\tCHECK\tEVIDENCE\tACTION")
-	for _, finding := range report.Findings {
-		if !showAll && finding.Status == audit.Pass {
-			continue
+	fmt.Fprintln(writer, "PRIORITY\tAREA\tISSUE\tOCCURRENCES\tEXAMPLE\tFIX")
+	for _, group := range groups {
+		example := ""
+		if len(group.Items) > 0 {
+			example = group.Items[0].URL
+			if group.Items[0].Evidence != "" {
+				example = strings.TrimSpace(example + " " + group.Items[0].Evidence)
+			}
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n",
-			strings.ToUpper(string(finding.Status)),
-			finding.Category,
-			finding.Check,
-			oneLine(finding.Evidence),
-			oneLine(finding.Fix),
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s\t%s\n",
+			strings.ToUpper(group.Priority),
+			group.Category,
+			group.Check,
+			len(group.Items),
+			oneLine(example),
+			oneLine(group.Fix),
 		)
 	}
 	writer.Flush()
+	fmt.Println()
+	fmt.Println("Use --json for every affected URL and the complete crawl dataset.")
 }
 
-func printRobots(report audit.RobotsReport) {
-	fmt.Printf("Robots: %s returned %d\n", report.URL, report.StatusCode)
-	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "AGENT\tACCESS\tMATCHED RULE")
-	for _, item := range report.Agents {
-		access := "blocked"
-		if item.Allowed {
-			access = "allowed"
-		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\n", item.Agent, access, item.Rule)
-	}
-	writer.Flush()
-}
-
-func printSitemaps(report audit.SitemapReport) {
-	fmt.Printf("Sitemaps: %d files, %d URLs\n", len(report.Sources), len(report.URLs))
-	for _, source := range report.Sources {
-		fmt.Println(" ", source)
-	}
-	for _, item := range report.Errors {
-		fmt.Println(" warning:", item)
-	}
-}
-
-func findingCounts(findings []audit.Finding) (int, int, int) {
-	var pass, warnings, failures int
+func groupFindings(findings []audit.Finding) []issueGroup {
+	grouped := map[string]*issueGroup{}
 	for _, finding := range findings {
-		switch finding.Status {
-		case audit.Pass:
-			pass++
-		case audit.Warn:
-			warnings++
-		case audit.Fail:
-			failures++
+		key := finding.Priority + "\x00" + finding.Category + "\x00" + finding.Check + "\x00" + finding.Fix
+		if grouped[key] == nil {
+			grouped[key] = &issueGroup{
+				Priority: finding.Priority,
+				Category: finding.Category,
+				Check:    finding.Check,
+				Fix:      finding.Fix,
+			}
 		}
+		grouped[key].Items = append(grouped[key].Items, finding)
 	}
-	return pass, warnings, failures
+	result := make([]issueGroup, 0, len(grouped))
+	for _, group := range grouped {
+		result = append(result, *group)
+	}
+	priority := map[string]int{"high": 0, "medium": 1, "low": 2}
+	sort.Slice(result, func(i, j int) bool {
+		if priority[result[i].Priority] != priority[result[j].Priority] {
+			return priority[result[i].Priority] < priority[result[j].Priority]
+		}
+		if result[i].Category != result[j].Category {
+			return result[i].Category < result[j].Category
+		}
+		return result[i].Check < result[j].Check
+	})
+	return result
 }
 
 func printJSON(value any) error {
@@ -227,11 +154,4 @@ func printJSON(value any) error {
 
 func oneLine(value string) string {
 	return strings.Join(strings.Fields(value), " ")
-}
-
-func valueOr(value, fallback string) string {
-	if strings.TrimSpace(value) == "" {
-		return fallback
-	}
-	return value
 }

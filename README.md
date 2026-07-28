@@ -1,37 +1,51 @@
 # seo-audit
 
-`seoaudit` is a Go CLI for simple SEO and GEO checks using only information published by the target website.
+`seoaudit` is a Go CLI for deep technical and on-page SEO audits using only information published by the target website.
 
-Stage 1 does not require accounts, API keys, analytics access, paid SEO data, a database, or external SEO services.
-
-## Stage 1
+## Run an audit
 
 ```sh
 seoaudit audit https://example.com
-seoaudit page https://example.com/about
-seoaudit robots https://example.com
-seoaudit sitemap https://example.com
-seoaudit roadmap
 ```
 
-Add `--json` for machine-readable output. By default, page reports show only failures and warnings. Add `--all` to include passing checks.
+That single command discovers sitemaps, reads `robots.txt`, crawls the same domain, checks linked resources and external links, reconciles site-wide signals, and prints a prioritised action list.
 
-## What Stage 1 reads
+Use `--json` for the complete crawl dataset and every affected URL:
 
-- HTTP status, redirects, HTTPS, response type, and fetch time
-- Page title, description, H1, canonical, robots directive, language, and viewport
-- Internal and external links found on one page
-- Images missing an `alt` attribute
-- JSON-LD presence and JSON syntax
-- Semantic main-content markup
-- Search and AI crawler rules in `robots.txt`
-- Sitemap declarations and public XML sitemap URLs
+```sh
+seoaudit audit https://example.com --json > audit.json
+```
+
+The crawl is capped at 500 pages by default:
+
+```sh
+seoaudit audit https://example.com --limit 2000
+```
+
+## Coverage
+
+- HTTP statuses, HTTPS, redirects, redirect chains, response type, size, and timing
+- `robots.txt`, Googlebot access, search and AI crawler rules
+- XML sitemap discovery, sitemap indexes, malformed sitemaps, and sitemap conflicts
+- Indexability from response codes, robots directives, `X-Robots-Tag`, and canonicals
+- HTML and HTTP canonicals, conflicting canonicals, and invalid canonical targets
+- Titles and descriptions: missing, multiple, duplicate, short, and long
+- H1 and heading structure: missing, multiple, duplicate, and skipped levels
+- Exact and near-duplicate visible content
+- Visible word count and very low-content indexable pages
+- Internal-link graph, crawl depth, sitemap-only pages, broken links, redirecting links, empty anchors, and internal `nofollow`
+- External link status checks
+- Images: missing alt attributes, mixed HTTP assets, broken resources, and large files
+- JSON-LD syntax and discovered schema types
+- Hreflang targets and reciprocal return links
+- Mobile viewport, page language, semantic main content, and mixed-content checks
+- URL casing, underscores, parameters, and excessive length
 
 ## Boundaries
 
-The CLI reports observable facts and deterministic recommendations. It does not claim to know rankings, traffic, keyword demand, backlinks, conversions, or AI citations from the website alone.
+The audit reports public, observable evidence and labels heuristics as review items. It does not claim access to Google index state, rankings, traffic, keyword demand, backlinks, conversions, Core Web Vitals field data, or AI citations.
 
-Later stages are listed in [docs/roadmap.md](docs/roadmap.md). They remain unimplemented until the previous stage is useful and verified.
+The crawler analyses server-returned HTML and automatically uses local Chrome for pages that expose very little raw content. Full raw-versus-rendered comparison on every page and browser performance traces are not yet included.
 
 ## Development
 

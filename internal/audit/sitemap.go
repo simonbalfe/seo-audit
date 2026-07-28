@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -73,8 +74,17 @@ func (c *Client) fetchSitemap(ctx context.Context, target string) (sitemapDocume
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return sitemapDocument{}, fmt.Errorf("%s returned %d", target, response.StatusCode)
 	}
+	var reader io.Reader = response.Body
+	if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "gzip") || strings.HasSuffix(strings.ToLower(target), ".gz") {
+		compressed, gzipErr := gzip.NewReader(response.Body)
+		if gzipErr != nil {
+			return sitemapDocument{}, fmt.Errorf("%s: %w", target, gzipErr)
+		}
+		defer compressed.Close()
+		reader = compressed
+	}
 	var document sitemapDocument
-	if err := xml.NewDecoder(io.LimitReader(response.Body, 10<<20)).Decode(&document); err != nil {
+	if err := xml.NewDecoder(io.LimitReader(reader, 10<<20)).Decode(&document); err != nil {
 		return sitemapDocument{}, fmt.Errorf("%s: %w", target, err)
 	}
 	return document, nil

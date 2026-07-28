@@ -25,7 +25,9 @@ func TestInspectPageExtractsPublicSignals(t *testing.T) {
 	}))
 	defer server.Close()
 
-	report, err := NewClient(2*time.Second).InspectPage(context.Background(), server.URL+"/page")
+	client := NewClient(2 * time.Second)
+	client.Render = false
+	report, err := client.InspectPage(context.Background(), server.URL+"/page")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +54,9 @@ func TestInspectRobotsEvaluatesAgents(t *testing.T) {
 	}))
 	defer server.Close()
 
-	report, err := NewClient(2*time.Second).InspectRobots(context.Background(), server.URL)
+	client := NewClient(2 * time.Second)
+	client.Render = false
+	report, err := client.InspectRobots(context.Background(), server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
