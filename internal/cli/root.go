@@ -16,6 +16,7 @@ import (
 
 type options struct {
 	json          bool
+	verbose       bool
 	timeout       time.Duration
 	limit         int
 	checkExternal bool
@@ -45,9 +46,16 @@ func Execute(ctx context.Context) error {
 		Short: "Crawl and audit a public website",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
+			var progress func(audit.ProgressEvent)
+			if opts.verbose {
+				progress = func(event audit.ProgressEvent) {
+					fmt.Fprintf(command.ErrOrStderr(), "[%s] %s\n", event.Stage, event.Message)
+				}
+			}
 			report, err := audit.NewClient(opts.timeout).Audit(command.Context(), args[0], audit.Options{
 				Limit:         opts.limit,
 				CheckExternal: opts.checkExternal,
+				Progress:      progress,
 			})
 			if err != nil {
 				return err
@@ -60,6 +68,7 @@ func Execute(ctx context.Context) error {
 		},
 	}
 	command.Flags().BoolVar(&opts.json, "json", false, "print the complete machine-readable report")
+	command.Flags().BoolVarP(&opts.verbose, "verbose", "v", false, "show crawl and analysis progress")
 	command.Flags().DurationVar(&opts.timeout, "timeout", 30*time.Second, "timeout for each request")
 	command.Flags().IntVar(&opts.limit, "limit", 500, "maximum pages to audit")
 	command.Flags().BoolVar(&opts.checkExternal, "external", true, "check discovered external links")

@@ -61,6 +61,42 @@ func TestAuditReturnsErrorWhenStartURLCannotBeFetched(t *testing.T) {
 	}
 }
 
+func TestAuditReportsProgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/robots.txt":
+			_, _ = writer.Write([]byte("User-agent: *\nAllow: /"))
+		case "/sitemap.xml":
+			writer.Header().Set("Content-Type", "application/xml")
+			_, _ = writer.Write([]byte("<urlset></urlset>"))
+		case "/":
+			writeHTML(writer, "Progress test page", "<h1>Progress test page</h1>")
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	var events []ProgressEvent
+	client := NewClient(2 * time.Second)
+	client.Render = false
+	_, err := client.Audit(context.Background(), server.URL, Options{
+		Limit: 5,
+		Progress: func(event ProgressEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, stage := range []string{"setup", "robots", "sitemaps", "crawl", "analysis", "resources", "done"} {
+		if !hasProgressStage(events, stage) {
+			t.Fatalf("missing progress stage %q in %#v", stage, events)
+		}
+	}
+}
+
 func TestAnalyzeURLIgnoresNonHTMLAssets(t *testing.T) {
 	report := SiteReport{}
 	analyzeURL(&report, PageReport{
@@ -70,6 +106,15 @@ func TestAnalyzeURLIgnoresNonHTMLAssets(t *testing.T) {
 	if len(report.Findings) != 0 {
 		t.Fatalf("expected no URL findings for non-HTML asset, got %#v", report.Findings)
 	}
+}
+
+func hasProgressStage(events []ProgressEvent, stage string) bool {
+	for _, event := range events {
+		if event.Stage == stage {
+			return true
+		}
+	}
+	return false
 }
 
 func writeHTML(writer http.ResponseWriter, title, body string) {

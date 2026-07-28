@@ -27,11 +27,21 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		options.Limit = 500
 	}
 	startURL := normalizeCrawlURL(start)
+	emitProgress(options, "setup", "Starting %s with a %d-page limit (external checks: %t)", startURL, options.Limit, options.CheckExternal)
+	emitProgress(options, "robots", "Fetching %s", (&url.URL{Scheme: start.Scheme, Host: start.Host, Path: "/robots.txt"}).String())
 	robots, robotsErr := c.InspectRobots(ctx, startURL)
 	if robotsErr != nil {
 		robots = RobotsReport{URL: (&url.URL{Scheme: start.Scheme, Host: start.Host, Path: "/robots.txt"}).String()}
+		emitProgress(options, "robots", "Could not fetch robots.txt: %v", robotsErr)
+	} else {
+		emitProgress(options, "robots", "HTTP %d; evaluated %d crawler agents; found %d sitemap declarations", robots.StatusCode, len(robots.Agents), len(robots.Sitemaps))
 	}
+	emitProgress(options, "sitemaps", "Discovering and parsing XML sitemaps")
 	sitemaps, _ := c.InspectSitemaps(ctx, startURL)
+	emitProgress(options, "sitemaps", "Parsed %d sitemap files with %d URLs and %d errors", len(sitemaps.Sources), len(sitemaps.URLs), len(sitemaps.Errors))
+	for _, sitemapErr := range sitemaps.Errors {
+		emitProgress(options, "sitemaps", "Error: %s", sitemapErr)
+	}
 	sitemapSet := map[string]bool{}
 	for _, item := range sitemaps.URLs {
 		parsed, parseErr := url.Parse(item)
@@ -46,12 +56,19 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 	seen := map[string]bool{}
 
 	crawlOne := func(item crawlItem) {
+		pageNumber := len(report.Pages) + 1
+		source := fmt.Sprintf("depth %d", item.Depth)
+		if item.Depth < 0 {
+			source = "sitemap-only"
+		}
+		emitProgress(options, "crawl", "Fetching page %d (%s, %d queued): %s", pageNumber, source, len(queue), item.URL)
 		page, inspectErr := c.InspectPage(ctx, item.URL)
 		if inspectErr != nil {
 			report.Findings = append(report.Findings, Finding{
 				Category: "response", Check: "Fetch failed", Status: Fail, Priority: "high",
 				URL: item.URL, Evidence: inspectErr.Error(), Fix: "Make the URL publicly reachable and return a valid response.",
 			})
+			emitProgress(options, "crawl", "Fetch failed for %s: %v", item.URL, inspectErr)
 			return
 		}
 		page.Depth = item.Depth
@@ -67,6 +84,27 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		}
 		report.Pages = append(report.Pages, page)
 		report.Findings = append(report.Findings, page.Findings...)
+		indexability := "indexable"
+		if !page.Indexable {
+			indexability = "non-indexable: " + page.Indexability
+		}
+		contentSource := "raw HTML"
+		if page.Rendered {
+			contentSource = "browser-rendered HTML"
+		}
+		emitProgress(
+			options,
+			"crawl",
+			"Fetched page %d: HTTP %d, %d words, %d internal links, %s, %s, %dms: %s",
+			len(report.Pages),
+			page.StatusCode,
+			page.WordCount,
+			len(page.InternalLinks),
+			indexability,
+			contentSource,
+			page.Duration,
+			page.FinalURL,
+		)
 		for _, link := range page.InternalLinks {
 			parsed, parseErr := url.Parse(link)
 			if parseErr != nil || !sameHost(start, parsed) {
@@ -117,14 +155,29 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		return SiteReport{}, errors.New("could not fetch any public URLs")
 	}
 	report.LimitReached = len(queue) > 0 || missingSitemapURLs(sitemapSet, seen) > 0
+	emitProgress(options, "crawl", "Crawl complete: %d pages fetched; limit reached: %t", len(report.Pages), report.LimitReached)
+	emitProgress(options, "analysis", "Analyzing architecture, links, canonicals, duplicates, hreflang, and URL format")
 	analyzeSite(&report)
-	report.Resources = c.checkResources(ctx, report, options.CheckExternal)
+	emitProgress(options, "analysis", "Site analysis produced %d findings before resource checks", len(report.Findings))
+	report.Resources = c.checkResources(ctx, report, options)
+	emitProgress(options, "analysis", "Analyzing %d resource responses", len(report.Resources))
 	analyzeResources(&report)
 	report.Summary = summarizeSite(report)
 	report.Duration = time.Since(started).Milliseconds()
 	sort.Slice(report.Pages, func(i, j int) bool { return report.Pages[i].URL < report.Pages[j].URL })
 	sortFindings(report.Findings)
+	emitProgress(options, "done", "Completed in %.1fs: %d pages, %d failures, %d warnings", float64(report.Duration)/1000, report.Summary.Pages, report.Summary.Failures, report.Summary.Warnings)
 	return report, nil
+}
+
+func emitProgress(options Options, stage, format string, values ...any) {
+	if options.Progress == nil {
+		return
+	}
+	options.Progress(ProgressEvent{
+		Stage:   stage,
+		Message: fmt.Sprintf(format, values...),
+	})
 }
 
 func analyzeSite(report *SiteReport) {
@@ -301,19 +354,28 @@ func analyzeURL(report *SiteReport, page PageReport) {
 	}
 }
 
-func (c *Client) checkResources(ctx context.Context, report SiteReport, includeExternal bool) []ResourceReport {
+func (c *Client) checkResources(ctx context.Context, report SiteReport, options Options) []ResourceReport {
 	start, _ := url.Parse(report.StartURL)
 	unique := map[string]bool{}
 	for _, page := range report.Pages {
 		for _, resource := range page.Resources {
 			unique[resource] = true
 		}
-		if includeExternal {
+		if options.CheckExternal {
 			for _, link := range page.ExternalLinks {
 				unique[link] = true
 			}
 		}
 	}
+	targets := make([]string, 0, len(unique))
+	for target := range unique {
+		parsed, err := url.Parse(target)
+		if err == nil && (options.CheckExternal || sameHost(start, parsed)) {
+			targets = append(targets, target)
+		}
+	}
+	sort.Strings(targets)
+	emitProgress(options, "resources", "Checking %d linked resources with 12 workers", len(targets))
 	jobs := make(chan string)
 	results := make(chan ResourceReport)
 	var workers sync.WaitGroup
@@ -327,11 +389,8 @@ func (c *Client) checkResources(ctx context.Context, report SiteReport, includeE
 		}()
 	}
 	go func() {
-		for target := range unique {
-			parsed, err := url.Parse(target)
-			if err == nil && (includeExternal || sameHost(start, parsed)) {
-				jobs <- target
-			}
+		for _, target := range targets {
+			jobs <- target
 		}
 		close(jobs)
 		workers.Wait()
@@ -340,6 +399,11 @@ func (c *Client) checkResources(ctx context.Context, report SiteReport, includeE
 	var output []ResourceReport
 	for result := range results {
 		output = append(output, result)
+		detail := fmt.Sprintf("HTTP %d", result.StatusCode)
+		if result.Error != "" {
+			detail = "error: " + result.Error
+		}
+		emitProgress(options, "resources", "Checked %d/%d: %s; %s", len(output), len(targets), result.URL, detail)
 	}
 	sort.Slice(output, func(i, j int) bool { return output[i].URL < output[j].URL })
 	return output

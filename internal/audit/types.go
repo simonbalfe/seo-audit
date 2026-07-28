@@ -149,9 +149,15 @@ type SiteReport struct {
 	Findings     []Finding        `json:"findings"`
 }
 
+type ProgressEvent struct {
+	Stage   string
+	Message string
+}
+
 type Options struct {
 	Limit         int
 	CheckExternal bool
+	Progress      func(ProgressEvent)
 }
 
 type Client struct {

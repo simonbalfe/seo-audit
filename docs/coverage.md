@@ -18,6 +18,7 @@ The public audit follows this priority order:
 - A URL found only in a sitemap is an orphan candidate, not proof that no link exists anywhere.
 - Deliberate `noindex` directives remain visible in each page's indexability evidence but are not standalone action items. A noindexed sitemap URL is still a failure.
 - Page URL-format heuristics apply to HTML documents, not public assets whose filenames follow an external convention.
+- Verbose mode reports robots, sitemap, page crawl, analysis, and linked-resource progress to stderr. It does not change audit coverage or JSON stdout.
 
 ## Public-only limitations
 

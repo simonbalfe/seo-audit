@@ -16,6 +16,18 @@ Use `--json` for the complete crawl dataset and every affected URL:
 seoaudit audit https://example.com --json > audit.json
 ```
 
+Use `--verbose` or `-v` to stream robots, sitemap, page crawl, analysis, and resource-check progress to stderr:
+
+```sh
+seoaudit audit https://example.com --verbose
+```
+
+Verbose logs can be combined with JSON without corrupting the JSON written to stdout:
+
+```sh
+seoaudit audit https://example.com --verbose --json > audit.json
+```
+
 The crawl is capped at 500 pages by default:
 
 ```sh
