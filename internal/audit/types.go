@@ -124,6 +124,47 @@ type ResourceReport struct {
 	Error       string `json:"error,omitempty"`
 }
 
+type PerformancePageReport struct {
+	URL                            string    `json:"url"`
+	Profile                        string    `json:"profile"`
+	FCPMilliseconds                float64   `json:"fcp_ms"`
+	LCPMilliseconds                float64   `json:"lcp_ms"`
+	CLS                            float64   `json:"cls"`
+	TBTMilliseconds                float64   `json:"tbt_ms"`
+	TTFBMilliseconds               float64   `json:"ttfb_ms"`
+	DOMContentLoadedMilliseconds   float64   `json:"dom_content_loaded_ms"`
+	LoadMilliseconds               float64   `json:"load_ms"`
+	Requests                       int       `json:"requests"`
+	TransferBytes                  int64     `json:"transfer_bytes"`
+	JavaScriptBytes                int64     `json:"javascript_bytes"`
+	CSSBytes                       int64     `json:"css_bytes"`
+	ImageBytes                     int64     `json:"image_bytes"`
+	ThirdPartyRequests             int       `json:"third_party_requests"`
+	DOMNodes                       int       `json:"dom_nodes"`
+	ImagesMissingDimensions        int       `json:"images_missing_dimensions"`
+	OffscreenImagesWithoutLazyLoad int       `json:"offscreen_images_without_lazy_load"`
+	Duration                       int64     `json:"duration_ms"`
+	Findings                       []Finding `json:"findings"`
+}
+
+type PerformanceSummary struct {
+	Pages       int     `json:"pages"`
+	Errors      int     `json:"errors"`
+	WorstLCP    float64 `json:"worst_lcp_ms"`
+	WorstCLS    float64 `json:"worst_cls"`
+	WorstTBT    float64 `json:"worst_tbt_ms"`
+	WorstTTFB   float64 `json:"worst_ttfb_ms"`
+	MaxTransfer int64   `json:"max_transfer_bytes"`
+}
+
+type PerformanceReport struct {
+	Available bool                    `json:"available"`
+	Profile   string                  `json:"profile"`
+	Pages     []PerformancePageReport `json:"pages"`
+	Errors    []string                `json:"errors,omitempty"`
+	Summary   PerformanceSummary      `json:"summary"`
+}
+
 type Summary struct {
 	Pages              int `json:"pages"`
 	Indexable          int `json:"indexable"`
@@ -138,15 +179,16 @@ type Summary struct {
 }
 
 type SiteReport struct {
-	StartURL     string           `json:"start_url"`
-	Duration     int64            `json:"duration_ms"`
-	LimitReached bool             `json:"limit_reached"`
-	Summary      Summary          `json:"summary"`
-	Robots       RobotsReport     `json:"robots"`
-	Sitemaps     SitemapReport    `json:"sitemaps"`
-	Pages        []PageReport     `json:"pages"`
-	Resources    []ResourceReport `json:"resources,omitempty"`
-	Findings     []Finding        `json:"findings"`
+	StartURL     string            `json:"start_url"`
+	Duration     int64             `json:"duration_ms"`
+	LimitReached bool              `json:"limit_reached"`
+	Summary      Summary           `json:"summary"`
+	Robots       RobotsReport      `json:"robots"`
+	Sitemaps     SitemapReport     `json:"sitemaps"`
+	Pages        []PageReport      `json:"pages"`
+	Resources    []ResourceReport  `json:"resources,omitempty"`
+	Performance  PerformanceReport `json:"performance"`
+	Findings     []Finding         `json:"findings"`
 }
 
 type ProgressEvent struct {
@@ -155,9 +197,10 @@ type ProgressEvent struct {
 }
 
 type Options struct {
-	Limit         int
-	CheckExternal bool
-	Progress      func(ProgressEvent)
+	Limit            int
+	CheckExternal    bool
+	CheckPerformance bool
+	Progress         func(ProgressEvent)
 }
 
 type Client struct {

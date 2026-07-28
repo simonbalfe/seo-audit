@@ -162,6 +162,12 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 	report.Resources = c.checkResources(ctx, report, options)
 	emitProgress(options, "analysis", "Analyzing %d resource responses", len(report.Resources))
 	analyzeResources(&report)
+	if options.CheckPerformance {
+		report.Performance = c.inspectPerformance(ctx, report, options)
+		for _, measured := range report.Performance.Pages {
+			report.Findings = append(report.Findings, measured.Findings...)
+		}
+	}
 	report.Summary = summarizeSite(report)
 	report.Duration = time.Since(started).Milliseconds()
 	sort.Slice(report.Pages, func(i, j int) bool { return report.Pages[i].URL < report.Pages[j].URL })

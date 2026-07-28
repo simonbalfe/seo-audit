@@ -19,6 +19,10 @@ The public audit follows this priority order:
 - Deliberate `noindex` directives remain visible in each page's indexability evidence but are not standalone action items. A noindexed sitemap URL is still a failure.
 - Page URL-format heuristics apply to HTML documents, not public assets whose filenames follow an external convention.
 - Verbose mode reports robots, sitemap, page crawl, analysis, and linked-resource progress to stderr. It does not change audit coverage or JSON stdout.
+- Local Chrome tests the homepage plus one page from each of the largest indexable path sections, capped at six pages per audit.
+- Performance uses a simulated mobile viewport, CPU slowdown, network throttling, disabled cache, and an isolated tab per measured page.
+- Lab performance includes FCP, LCP, CLS, observed TBT, TTFB, page milestones, transfer/request weight, DOM size, and rendered-image diagnostics.
+- INP is field-only in this context. The audit reports TBT as a lab proxy and does not claim Core Web Vitals field compliance.
 
 ## Public-only limitations
 

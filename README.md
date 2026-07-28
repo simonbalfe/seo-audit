@@ -8,7 +8,7 @@
 seoaudit audit https://example.com
 ```
 
-That single command discovers sitemaps, reads `robots.txt`, crawls the same domain, checks linked resources and external links, reconciles site-wide signals, and prints a prioritised action list.
+That single command discovers sitemaps, reads `robots.txt`, crawls the same domain, checks linked resources and external links, runs mobile performance tests on representative page templates, reconciles site-wide signals, and prints a prioritised action list.
 
 Use `--json` for the complete crawl dataset and every affected URL:
 
@@ -34,6 +34,18 @@ The crawl is capped at 500 pages by default:
 seoaudit audit https://example.com --limit 2000
 ```
 
+Performance testing is enabled by default. It uses local Chrome to test the homepage and up to five representative indexable sections under a bounded simulated mobile profile:
+
+```sh
+seoaudit audit https://example.com
+```
+
+Disable the slower browser performance stage when you only need the HTTP and HTML crawl:
+
+```sh
+seoaudit audit https://example.com --performance=false
+```
+
 ## Coverage
 
 - HTTP statuses, HTTPS, redirects, redirect chains, response type, size, and timing
@@ -52,12 +64,13 @@ seoaudit audit https://example.com --limit 2000
 - Hreflang targets and reciprocal return links
 - Mobile viewport, page language, semantic main content, and mixed-content checks
 - HTML page URL casing, underscores, parameters, and excessive length
+- Representative mobile lab performance: FCP, LCP, CLS, TBT, TTFB, DOM/load timing, requests, transfer size, JavaScript/CSS/image weight, third-party requests, DOM size, image dimensions, and offscreen lazy loading
 
 ## Boundaries
 
 The audit reports public, observable evidence and labels heuristics as review items. It does not claim access to Google index state, rankings, traffic, keyword demand, backlinks, conversions, Core Web Vitals field data, or AI citations.
 
-The crawler analyses server-returned HTML and automatically uses local Chrome for pages that expose very little raw content. Full raw-versus-rendered comparison on every page and browser performance traces are not yet included.
+The crawler analyses server-returned HTML and automatically uses local Chrome for pages that expose very little raw content. Performance results are reproducible lab diagnostics under a simulated mobile profile, not Chrome User Experience Report field data or a Google ranking guarantee. INP requires real interaction data and is therefore not invented by the lab audit; TBT is reported as its development-time proxy.
 
 Deliberate `noindex` directives remain visible in page-level indexability data. They become actionable failures when a non-indexable URL is also submitted in a sitemap.
 

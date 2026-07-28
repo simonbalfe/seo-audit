@@ -20,6 +20,7 @@ type options struct {
 	timeout       time.Duration
 	limit         int
 	checkExternal bool
+	performance   bool
 }
 
 type issueGroup struct {
@@ -53,9 +54,10 @@ func Execute(ctx context.Context) error {
 				}
 			}
 			report, err := audit.NewClient(opts.timeout).Audit(command.Context(), args[0], audit.Options{
-				Limit:         opts.limit,
-				CheckExternal: opts.checkExternal,
-				Progress:      progress,
+				Limit:            opts.limit,
+				CheckExternal:    opts.checkExternal,
+				CheckPerformance: opts.performance,
+				Progress:         progress,
 			})
 			if err != nil {
 				return err
@@ -72,6 +74,7 @@ func Execute(ctx context.Context) error {
 	command.Flags().DurationVar(&opts.timeout, "timeout", 30*time.Second, "timeout for each request")
 	command.Flags().IntVar(&opts.limit, "limit", 500, "maximum pages to audit")
 	command.Flags().BoolVar(&opts.checkExternal, "external", true, "check discovered external links")
+	command.Flags().BoolVar(&opts.performance, "performance", true, "test representative pages with local Chrome")
 	root.AddCommand(command)
 	return root.ExecuteContext(ctx)
 }
@@ -90,6 +93,19 @@ func printReport(report audit.SiteReport) {
 		report.Summary.SitemapURLs,
 	)
 	fmt.Printf("Actions: %d failures, %d warnings\n", report.Summary.Failures, report.Summary.Warnings)
+	if report.Performance.Available {
+		fmt.Printf(
+			"Performance: %d %s pages (worst LCP %.1fs, CLS %.3f, TBT %.0fms, TTFB %.0fms)\n",
+			report.Performance.Summary.Pages,
+			report.Performance.Profile,
+			report.Performance.Summary.WorstLCP/1000,
+			report.Performance.Summary.WorstCLS,
+			report.Performance.Summary.WorstTBT,
+			report.Performance.Summary.WorstTTFB,
+		)
+	} else if optsPerformanceExpected(report) {
+		fmt.Printf("Performance: unavailable (%s)\n", strings.Join(report.Performance.Errors, "; "))
+	}
 	if report.LimitReached {
 		fmt.Println("Warning: crawl limit reached; rerun with a higher --limit for complete coverage.")
 	}
@@ -122,6 +138,10 @@ func printReport(report audit.SiteReport) {
 	writer.Flush()
 	fmt.Println()
 	fmt.Println("Use --json for every affected URL and the complete crawl dataset.")
+}
+
+func optsPerformanceExpected(report audit.SiteReport) bool {
+	return report.Performance.Profile != "" || len(report.Performance.Errors) > 0
 }
 
 func groupFindings(findings []audit.Finding) []issueGroup {
