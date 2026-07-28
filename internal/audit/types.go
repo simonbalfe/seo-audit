@@ -65,6 +65,13 @@ type PageReport struct {
 	H1                []string    `json:"h1,omitempty"`
 	H2                []string    `json:"h2,omitempty"`
 	HeadingLevels     []int       `json:"heading_levels,omitempty"`
+	FirstParagraph    string      `json:"first_paragraph,omitempty"`
+	ParagraphCount    int         `json:"paragraph_count"`
+	LongestParagraph  int         `json:"longest_paragraph_words"`
+	HasArticle        bool        `json:"has_article"`
+	Author            string      `json:"author,omitempty"`
+	PublishedDate     string      `json:"published_date,omitempty"`
+	ModifiedDate      string      `json:"modified_date,omitempty"`
 	Canonical         string      `json:"canonical,omitempty"`
 	Canonicals        []string    `json:"canonicals,omitempty"`
 	Robots            string      `json:"robots,omitempty"`

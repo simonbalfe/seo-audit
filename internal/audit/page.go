@@ -122,6 +122,8 @@ func extractPage(document *html.Node, base *url.URL, report *PageReport) {
 				report.Language = strings.TrimSpace(attribute(node, "lang"))
 			case "head":
 			case "body":
+			case "article":
+				report.HasArticle = true
 			case "title":
 				value := cleanText(nodeText(node))
 				report.Titles = append(report.Titles, value)
@@ -140,6 +142,20 @@ func extractPage(document *html.Node, base *url.URL, report *PageReport) {
 				}
 			case "main":
 				report.HasMain = true
+			case "p":
+				value := cleanText(nodeText(node))
+				words := len(tokenize(value))
+				if words > 0 {
+					report.ParagraphCount++
+					if words > report.LongestParagraph {
+						report.LongestParagraph = words
+					}
+					if report.FirstParagraph == "" && words >= 5 {
+						report.FirstParagraph = value
+					}
+				}
+			case "time":
+				extractTime(node, report)
 			case "meta":
 				extractMeta(node, report)
 			case "link":
@@ -163,6 +179,9 @@ func extractPage(document *html.Node, base *url.URL, report *PageReport) {
 				if source := resolveURL(base, attribute(node, "src")); source != "" {
 					report.Resources = appendUnique(report.Resources, source)
 				}
+			}
+			if report.Author == "" && (hasToken(attribute(node, "rel"), "author") || strings.EqualFold(attribute(node, "itemprop"), "author")) {
+				report.Author = cleanText(nodeText(node))
 			}
 		}
 		if node.Type == html.TextNode && !hidden {
@@ -200,12 +219,20 @@ func extractMeta(node *html.Node, report *PageReport) {
 		report.HasViewport = true
 	case "twitter:card":
 		report.TwitterCard = content
+	case "author":
+		report.Author = content
 	}
 	if property == "og:title" {
 		report.OpenGraphTitle = content
 	}
 	if property == "og:description" {
 		report.OpenGraphDesc = content
+	}
+	if property == "article:published_time" || property == "og:published_time" {
+		report.PublishedDate = content
+	}
+	if property == "article:modified_time" || property == "og:updated_time" {
+		report.ModifiedDate = content
 	}
 	if strings.EqualFold(attribute(node, "charset"), "utf-8") || attribute(node, "charset") != "" {
 		report.HasCharset = true
@@ -289,6 +316,79 @@ func extractJSONLD(raw string, report *PageReport) {
 		return
 	}
 	collectSchemaTypes(value, &report.SchemaTypes)
+	collectContentMetadata(value, report)
+}
+
+func collectContentMetadata(value any, report *PageReport) {
+	switch item := value.(type) {
+	case map[string]any:
+		if schemaType, ok := item["@type"].(string); ok && isArticleSchema(schemaType) {
+			report.HasArticle = true
+		}
+		if report.Author == "" {
+			report.Author = schemaName(item["author"])
+		}
+		if report.PublishedDate == "" {
+			report.PublishedDate = schemaText(item["datePublished"])
+		}
+		if report.ModifiedDate == "" {
+			report.ModifiedDate = schemaText(item["dateModified"])
+		}
+		for _, child := range item {
+			collectContentMetadata(child, report)
+		}
+	case []any:
+		for _, child := range item {
+			collectContentMetadata(child, report)
+		}
+	}
+}
+
+func schemaName(value any) string {
+	switch item := value.(type) {
+	case string:
+		return cleanText(item)
+	case map[string]any:
+		return schemaText(item["name"])
+	case []any:
+		for _, candidate := range item {
+			if name := schemaName(candidate); name != "" {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+func schemaText(value any) string {
+	text, _ := value.(string)
+	return cleanText(text)
+}
+
+func extractTime(node *html.Node, report *PageReport) {
+	value := cleanText(attribute(node, "datetime"))
+	if value == "" {
+		value = cleanText(nodeText(node))
+	}
+	if value == "" {
+		return
+	}
+	signal := strings.ToLower(strings.Join([]string{
+		attribute(node, "itemprop"),
+		attribute(node, "class"),
+		attribute(node, "data-testid"),
+	}, " "))
+	if strings.Contains(signal, "modified") || strings.Contains(signal, "updated") {
+		if report.ModifiedDate == "" {
+			report.ModifiedDate = value
+		}
+		return
+	}
+	if strings.Contains(signal, "published") || hasAncestor(node, "article") {
+		if report.PublishedDate == "" {
+			report.PublishedDate = value
+		}
+	}
 }
 
 func collectSchemaTypes(value any, types *[]string) {
@@ -400,6 +500,23 @@ func pageFindings(page PageReport) []Finding {
 		if page.WordCount < 50 && page.Indexable {
 			add("content", "Very little visible text", Warn, "medium", fmt.Sprintf("%d words", page.WordCount), "Review whether the page provides enough unique value for its purpose.")
 		}
+		if page.Indexable && page.WordCount >= 500 && len(page.H2) == 0 {
+			add("content-review", "Long page has no subheadings", Warn, "low", fmt.Sprintf("%d words and no H2 headings", page.WordCount), "Break long content into descriptive sections that help readers scan and understand it.")
+		}
+		if page.Indexable && page.LongestParagraph > 150 {
+			add("content-review", "Very long paragraph", Warn, "low", fmt.Sprintf("longest paragraph is %d words", page.LongestParagraph), "Split the paragraph where the subject changes so the content is easier to scan.")
+		}
+		if page.Indexable && isArticlePage(page) {
+			if page.Author == "" {
+				add("content-review", "Article author not evident", Warn, "low", "no public author signal found", "Show a real author or responsible organisation when authorship helps readers assess the content.")
+			}
+			if page.PublishedDate == "" && page.ModifiedDate == "" {
+				add("content-review", "Article date not evident", Warn, "low", "no published or updated date found", "Show a published or updated date when freshness matters to the topic.")
+			}
+			if page.WordCount >= 500 && len(page.ExternalLinks) == 0 {
+				add("content-review", "Long article has no external sources", Warn, "low", fmt.Sprintf("%d words and no external links", page.WordCount), "Review factual claims and link to useful primary sources where external evidence is appropriate.")
+			}
+		}
 		for _, resource := range append(append([]string{}, page.Resources...), page.ExternalLinks...) {
 			if strings.HasPrefix(page.FinalURL, "https://") && strings.HasPrefix(resource, "http://") {
 				add("security", "Mixed HTTP resource", Fail, "high", resource, "Load every resource and link target over HTTPS.")
@@ -408,6 +525,38 @@ func pageFindings(page PageReport) []Finding {
 		}
 	}
 	return findings
+}
+
+func isArticlePage(page PageReport) bool {
+	for _, schemaType := range page.SchemaTypes {
+		if isArticleSchema(schemaType) {
+			return true
+		}
+	}
+	parsed, err := url.Parse(page.FinalURL)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	return len(parts) >= 2 && strings.EqualFold(parts[0], "blog")
+}
+
+func isArticleSchema(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "article", "blogposting", "newsarticle":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasAncestor(node *html.Node, tag string) bool {
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if parent.Type == html.ElementNode && strings.EqualFold(parent.Data, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 func skippedHeadingLevel(levels []int) bool {

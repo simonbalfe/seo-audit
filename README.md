@@ -65,6 +65,9 @@ seoaudit audit https://example.com --performance=false
 - Mobile viewport, page language, semantic main content, and mixed-content checks
 - HTML page URL casing, underscores, parameters, and excessive length
 - Representative mobile lab performance: FCP, LCP, CLS, TBT, TTFB, DOM/load timing, requests, transfer size, JavaScript/CSS/image weight, third-party requests, DOM size, image dimensions, and offscreen lazy loading
+- Content review signals: editorial article author and date evidence, long-form sourcing, subheading use, and paragraph readability
+
+See [`docs/roadmap.md`](docs/roadmap.md) for planned Lighthouse, content, trust, and authority coverage.
 
 ## Boundaries
 

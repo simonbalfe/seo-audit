@@ -6,7 +6,8 @@ The public audit follows this priority order:
 2. response and canonical integrity;
 3. page titles, descriptions, headings, and visible content;
 4. internal links, crawl depth, duplication, and sitemap consistency;
-5. images, resources, schema syntax, hreflang, mobile basics, and public AI crawler access.
+5. content clarity, article trust signals, and long-form readability;
+6. images, resources, schema syntax, hreflang, mobile basics, and public AI crawler access.
 
 ## Evidence policy
 
@@ -23,6 +24,8 @@ The public audit follows this priority order:
 - Performance uses a simulated mobile viewport, CPU slowdown, network throttling, disabled cache, and an isolated tab per measured page.
 - Lab performance includes FCP, LCP, CLS, observed TBT, TTFB, page milestones, transfer/request weight, DOM size, and rendered-image diagnostics.
 - INP is field-only in this context. The audit reports TBT as a lab proxy and does not claim Core Web Vitals field compliance.
+- Content review checks cover author and date signals on editorial articles, external sourcing on long articles, subheading use, and unusually long paragraphs.
+- Content review findings are low-priority prompts for human review. They are not claims that a page is unhelpful or unable to rank.
 
 ## Public-only limitations
 
@@ -31,3 +34,4 @@ The public audit follows this priority order:
 - Search demand, rankings, backlinks, and conversions cannot be inferred from the website alone.
 - Sparse client-rendered pages are automatically rendered with local Chrome when available.
 - JavaScript changes on otherwise content-rich pages can still require separate raw-versus-rendered validation.
+- Search intent, originality, factual accuracy, expertise, and comparative content quality require human or explicitly enabled model review.
