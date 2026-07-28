@@ -8,7 +8,6 @@ import (
 type Status string
 
 const (
-	Pass Status = "pass"
 	Warn Status = "warn"
 	Fail Status = "fail"
 )

@@ -1,11 +1,13 @@
 # SEO Audit guidance
 
-SEO Audit is a public-site-only Go CLI. Keep findings deterministic and tied to evidence fetched from the target domain.
+SEO Audit is a Go CLI with a public-site audit by default and explicitly enabled external search data. Keep findings deterministic and tied to fetched evidence.
 
 ## Product contract
 
 - Keep one user-facing operation: `seoaudit audit <url>`.
-- Do not add private account access, paid SEO datasets, rankings, backlinks, keyword volume, or AI citation monitoring without an explicit scope change.
+- Keep the default command free of accounts and paid calls.
+- Make paid SEO datasets explicit, report provider and request cost, and retain their source semantics rather than presenting estimates as first-party truth.
+- Do not add AI-generated findings or citation monitoring without an explicit scope change.
 - Keep requests bounded by page size, timeout, redirect count, sitemap count, crawl limit, and worker count.
 - Do not describe heuristics as search-engine rules or ranking guarantees.
 - Do not report missing optional schema as an error.

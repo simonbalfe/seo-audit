@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -64,10 +63,15 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		emitProgress(options, "crawl", "Fetching page %d (%s, %d queued): %s", pageNumber, source, len(queue), item.URL)
 		page, inspectErr := c.InspectPage(ctx, item.URL)
 		if inspectErr != nil {
-			report.Findings = append(report.Findings, Finding{
-				Category: "response", Check: "Fetch failed", Status: Fail, Priority: "high",
-				URL: item.URL, Evidence: inspectErr.Error(), Fix: "Make the URL publicly reachable and return a valid response.",
-			})
+			report.Findings = append(report.Findings, newFinding(
+				"response",
+				"Fetch failed",
+				Fail,
+				"high",
+				item.URL,
+				inspectErr.Error(),
+				"Make the URL publicly reachable and return a valid response.",
+			))
 			emitProgress(options, "crawl", "Fetch failed for %s: %v", item.URL, inspectErr)
 			return
 		}
@@ -77,10 +81,15 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		if !page.RobotsAllowed {
 			page.Indexable = false
 			page.Indexability = "blocked by robots.txt"
-			page.Findings = append(page.Findings, Finding{
-				Category: "crawlability", Check: "Blocked by robots.txt", Status: Fail, Priority: "high",
-				URL: page.URL, Evidence: pathOf(page.URL), Fix: "Allow Googlebot to crawl the page if it should appear in search.",
-			})
+			page.Findings = append(page.Findings, newFinding(
+				"crawlability",
+				"Blocked by robots.txt",
+				Fail,
+				"high",
+				page.URL,
+				pathOf(page.URL),
+				"Allow Googlebot to crawl the page if it should appear in search.",
+			))
 		}
 		report.Pages = append(report.Pages, page)
 		report.Findings = append(report.Findings, page.Findings...)
@@ -118,15 +127,18 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		}
 	}
 
-	for len(queue) > 0 && len(report.Pages) < options.Limit {
-		item := queue[0]
-		queue = queue[1:]
-		if seen[item.URL] {
-			continue
+	crawlQueued := func() {
+		for len(queue) > 0 && len(report.Pages) < options.Limit {
+			item := queue[0]
+			queue = queue[1:]
+			if seen[item.URL] {
+				continue
+			}
+			seen[item.URL] = true
+			crawlOne(item)
 		}
-		seen[item.URL] = true
-		crawlOne(item)
 	}
+	crawlQueued()
 	for sitemapURL := range sitemapSet {
 		if len(report.Pages) >= options.Limit {
 			break
@@ -137,15 +149,7 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		seen[sitemapURL] = true
 		crawlOne(crawlItem{URL: sitemapURL, Depth: -1})
 	}
-	for len(queue) > 0 && len(report.Pages) < options.Limit {
-		item := queue[0]
-		queue = queue[1:]
-		if seen[item.URL] {
-			continue
-		}
-		seen[item.URL] = true
-		crawlOne(item)
-	}
+	crawlQueued()
 	if len(report.Pages) == 0 {
 		for _, finding := range report.Findings {
 			if finding.Check == "Fetch failed" {
@@ -154,7 +158,7 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		}
 		return SiteReport{}, errors.New("could not fetch any public URLs")
 	}
-	report.LimitReached = len(queue) > 0 || missingSitemapURLs(sitemapSet, seen) > 0
+	report.LimitReached = len(queue) > 0 || hasUnseenSitemapURL(sitemapSet, seen)
 	emitProgress(options, "crawl", "Crawl complete: %d pages fetched; limit reached: %t", len(report.Pages), report.LimitReached)
 	emitProgress(options, "analysis", "Analyzing architecture, links, canonicals, duplicates, hreflang, and URL format")
 	analyzeSite(&report)
@@ -200,7 +204,7 @@ func analyzeSite(report *SiteReport) {
 	for index := range report.Pages {
 		page := &report.Pages[index]
 		page.Inlinks = inlinks[normalizeComparableURL(page.URL)]
-		isHTML := strings.Contains(strings.ToLower(page.ContentType), "html")
+		isHTML := isHTMLContent(page.ContentType)
 		if page.Depth < 0 && page.InSitemap && page.Indexable && isHTML {
 			addSiteFinding(report, "architecture", "Sitemap-only page", Warn, "medium", page.URL, "not found through internal links", "Add a relevant internal link or remove the URL from the sitemap.")
 		}
@@ -339,7 +343,7 @@ func analyzeHreflang(report *SiteReport, pages map[string]*PageReport) {
 }
 
 func analyzeURL(report *SiteReport, page PageReport) {
-	if !strings.Contains(strings.ToLower(page.ContentType), "html") {
+	if !isHTMLContent(page.ContentType) {
 		return
 	}
 	parsed, err := url.Parse(page.URL)
@@ -357,110 +361,6 @@ func analyzeURL(report *SiteReport, page PageReport) {
 	}
 	if len(page.URL) > 150 {
 		addSiteFinding(report, "url", "Long URL", Warn, "low", page.URL, fmt.Sprintf("%d characters", len(page.URL)), "Shorten the URL where this can be done safely.")
-	}
-}
-
-func (c *Client) checkResources(ctx context.Context, report SiteReport, options Options) []ResourceReport {
-	start, _ := url.Parse(report.StartURL)
-	unique := map[string]bool{}
-	for _, page := range report.Pages {
-		for _, resource := range page.Resources {
-			unique[resource] = true
-		}
-		if options.CheckExternal {
-			for _, link := range page.ExternalLinks {
-				unique[link] = true
-			}
-		}
-	}
-	targets := make([]string, 0, len(unique))
-	for target := range unique {
-		parsed, err := url.Parse(target)
-		if err == nil && (options.CheckExternal || sameHost(start, parsed)) {
-			targets = append(targets, target)
-		}
-	}
-	sort.Strings(targets)
-	emitProgress(options, "resources", "Checking %d linked resources with 12 workers", len(targets))
-	jobs := make(chan string)
-	results := make(chan ResourceReport)
-	var workers sync.WaitGroup
-	for count := 0; count < 12; count++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			for target := range jobs {
-				results <- c.checkResource(ctx, target)
-			}
-		}()
-	}
-	go func() {
-		for _, target := range targets {
-			jobs <- target
-		}
-		close(jobs)
-		workers.Wait()
-		close(results)
-	}()
-	var output []ResourceReport
-	for result := range results {
-		output = append(output, result)
-		detail := fmt.Sprintf("HTTP %d", result.StatusCode)
-		if result.Error != "" {
-			detail = "error: " + result.Error
-		}
-		emitProgress(options, "resources", "Checked %d/%d: %s; %s", len(output), len(targets), result.URL, detail)
-	}
-	sort.Slice(output, func(i, j int) bool { return output[i].URL < output[j].URL })
-	return output
-}
-
-func (c *Client) checkResource(ctx context.Context, target string) ResourceReport {
-	result := ResourceReport{URL: target}
-	do := func(method string) (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, method, target, nil)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("User-Agent", c.UserAgent)
-		if method == http.MethodGet {
-			req.Header.Set("Range", "bytes=0-0")
-		}
-		return c.HTTP.Do(req)
-	}
-	response, err := do(http.MethodHead)
-	if err == nil && response.StatusCode >= 400 {
-		response.Body.Close()
-		response, err = do(http.MethodGet)
-	}
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	defer response.Body.Close()
-	result.StatusCode = response.StatusCode
-	result.ContentType = response.Header.Get("Content-Type")
-	result.SizeBytes = response.ContentLength
-	return result
-}
-
-func analyzeResources(report *SiteReport) {
-	start, _ := url.Parse(report.StartURL)
-	for _, resource := range report.Resources {
-		parsed, _ := url.Parse(resource.URL)
-		internal := parsed != nil && sameHost(start, parsed)
-		if resource.StatusCode >= 400 {
-			priority := "low"
-			status := Warn
-			if internal {
-				priority = "high"
-				status = Fail
-			}
-			addSiteFinding(report, "resources", "Broken resource or external link", status, priority, resource.URL, fmt.Sprintf("HTTP %d", resource.StatusCode), "Update or remove the failing URL.")
-		}
-		if internal && strings.HasPrefix(resource.ContentType, "image/") && resource.SizeBytes > 500*1024 {
-			addSiteFinding(report, "images", "Large image", Warn, "medium", resource.URL, fmt.Sprintf("%d KB", resource.SizeBytes/1024), "Compress and resize the image, then serve a modern format where practical.")
-		}
 	}
 }
 
@@ -501,10 +401,7 @@ func summarizeSite(report SiteReport) Summary {
 }
 
 func addSiteFinding(report *SiteReport, category, check string, status Status, priority, target, evidence, fix string) {
-	report.Findings = append(report.Findings, Finding{
-		Category: category, Check: check, Status: status, Priority: priority,
-		URL: target, Evidence: evidence, Fix: fix,
-	})
+	report.Findings = append(report.Findings, newFinding(category, check, status, priority, target, evidence, fix))
 }
 
 func pathOf(raw string) string {
@@ -515,14 +412,13 @@ func pathOf(raw string) string {
 	return parsed.EscapedPath()
 }
 
-func missingSitemapURLs(sitemap, seen map[string]bool) int {
-	missing := 0
+func hasUnseenSitemapURL(sitemap, seen map[string]bool) bool {
 	for item := range sitemap {
 		if !seen[item] {
-			missing++
+			return true
 		}
 	}
-	return missing
+	return false
 }
 
 func hasReturnHreflang(page PageReport, target string) bool {

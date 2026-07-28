@@ -35,3 +35,17 @@ The public audit follows this priority order:
 - Sparse client-rendered pages are automatically rendered with local Chrome when available.
 - JavaScript changes on otherwise content-rich pages can still require separate raw-versus-rendered validation.
 - Search intent, originality, factual accuracy, expertise, and comparative content quality require human or explicitly enabled model review.
+
+## Optional external search data
+
+`--dataforseo` adds seven direct DataForSEO REST datasets without changing the deterministic website findings:
+
+- organic ranking distribution and estimated visibility;
+- ranked keywords and ranking URLs;
+- domain-relevant keyword ideas with demand and competition metrics when available;
+- organic competitors based on keyword overlap;
+- backlink summary and provider authority signals;
+- referring domains;
+- individual top live backlinks.
+
+The report records source, target, location, language, retrieval time, successful calls, dataset errors, and the exact provider cost returned by the API. External estimates are not presented as Google Search Console or analytics measurements.

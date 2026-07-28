@@ -2,15 +2,11 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"sort"
-	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/simonbalfe/seo-audit/internal/audit"
+	"github.com/simonbalfe/seo-audit/internal/dataforseo"
 	"github.com/spf13/cobra"
 )
 
@@ -21,18 +17,26 @@ type options struct {
 	limit         int
 	checkExternal bool
 	performance   bool
+	dataForSEO    bool
+	location      string
+	language      string
+	dataLimit     int
 }
 
 type issueGroup struct {
-	Priority string
-	Category string
-	Check    string
-	Fix      string
-	Items    []audit.Finding
+	priority string
+	category string
+	check    string
+	fix      string
+	items    []audit.Finding
+}
+
+type completeReport struct {
+	audit.SiteReport
+	SearchData *dataforseo.Report `json:"search_data,omitempty"`
 }
 
 func Execute(ctx context.Context) error {
-	opts := &options{}
 	root := &cobra.Command{
 		Use:           "seoaudit",
 		Short:         "Deep public website SEO auditor",
@@ -42,31 +46,18 @@ func Execute(ctx context.Context) error {
 			DisableDefaultCmd: true,
 		},
 	}
+	root.AddCommand(newAuditCommand())
+	return root.ExecuteContext(ctx)
+}
+
+func newAuditCommand() *cobra.Command {
+	opts := &options{}
 	command := &cobra.Command{
 		Use:   "audit <url>",
 		Short: "Crawl and audit a public website",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			var progress func(audit.ProgressEvent)
-			if opts.verbose {
-				progress = func(event audit.ProgressEvent) {
-					fmt.Fprintf(command.ErrOrStderr(), "[%s] %s\n", event.Stage, event.Message)
-				}
-			}
-			report, err := audit.NewClient(opts.timeout).Audit(command.Context(), args[0], audit.Options{
-				Limit:            opts.limit,
-				CheckExternal:    opts.checkExternal,
-				CheckPerformance: opts.performance,
-				Progress:         progress,
-			})
-			if err != nil {
-				return err
-			}
-			if opts.json {
-				return printJSON(report)
-			}
-			printReport(report)
-			return nil
+			return opts.runAudit(command, args[0])
 		},
 	}
 	command.Flags().BoolVar(&opts.json, "json", false, "print the complete machine-readable report")
@@ -75,112 +66,71 @@ func Execute(ctx context.Context) error {
 	command.Flags().IntVar(&opts.limit, "limit", 500, "maximum pages to audit")
 	command.Flags().BoolVar(&opts.checkExternal, "external", true, "check discovered external links")
 	command.Flags().BoolVar(&opts.performance, "performance", true, "test representative pages with local Chrome")
-	root.AddCommand(command)
-	return root.ExecuteContext(ctx)
+	command.Flags().BoolVar(&opts.dataForSEO, "dataforseo", false, "add paid search, keyword, competitor, and backlink data")
+	command.Flags().StringVar(&opts.location, "location", "United Kingdom", "DataForSEO search location")
+	command.Flags().StringVar(&opts.language, "language", "en", "DataForSEO language code")
+	command.Flags().IntVar(&opts.dataLimit, "data-limit", 25, "maximum rows per DataForSEO dataset")
+	return command
 }
 
-func printReport(report audit.SiteReport) {
-	fmt.Printf("SEO audit: %s\n", report.StartURL)
-	fmt.Printf("Crawled: %d URLs (%d indexable, %d non-indexable) in %.1fs\n",
-		report.Summary.Pages,
-		report.Summary.Indexable,
-		report.Summary.NonIndexable,
-		float64(report.Duration)/1000,
-	)
-	fmt.Printf("Discovered: %d internal links, %d external links, %d sitemap URLs\n",
-		report.Summary.InternalLinks,
-		report.Summary.ExternalLinks,
-		report.Summary.SitemapURLs,
-	)
-	fmt.Printf("Actions: %d failures, %d warnings\n", report.Summary.Failures, report.Summary.Warnings)
-	if report.Performance.Available {
-		fmt.Printf(
-			"Performance: %d %s pages (worst LCP %.1fs, CLS %.3f, TBT %.0fms, TTFB %.0fms)\n",
-			report.Performance.Summary.Pages,
-			report.Performance.Profile,
-			report.Performance.Summary.WorstLCP/1000,
-			report.Performance.Summary.WorstCLS,
-			report.Performance.Summary.WorstTBT,
-			report.Performance.Summary.WorstTTFB,
-		)
-	} else if optsPerformanceExpected(report) {
-		fmt.Printf("Performance: unavailable (%s)\n", strings.Join(report.Performance.Errors, "; "))
+func (opts options) runAudit(command *cobra.Command, rawURL string) error {
+	var searchClient *dataforseo.Client
+	if opts.dataForSEO {
+		var err error
+		searchClient, err = dataforseo.NewClient()
+		if err != nil {
+			return err
+		}
 	}
-	if report.LimitReached {
-		fmt.Println("Warning: crawl limit reached; rerun with a higher --limit for complete coverage.")
-	}
-	fmt.Println()
 
-	groups := groupFindings(report.Findings)
-	if len(groups) == 0 {
-		fmt.Println("No deterministic issues found in the public crawl.")
-		return
-	}
-	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "PRIORITY\tAREA\tISSUE\tOCCURRENCES\tEXAMPLE\tFIX")
-	for _, group := range groups {
-		example := ""
-		if len(group.Items) > 0 {
-			example = group.Items[0].URL
-			if group.Items[0].Evidence != "" {
-				example = strings.TrimSpace(example + " " + group.Items[0].Evidence)
-			}
+	var crawlProgress func(audit.ProgressEvent)
+	if opts.verbose {
+		crawlProgress = func(event audit.ProgressEvent) {
+			fmt.Fprintf(command.ErrOrStderr(), "[%s] %s\n", event.Stage, event.Message)
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s\t%s\n",
-			strings.ToUpper(group.Priority),
-			group.Category,
-			group.Check,
-			len(group.Items),
-			oneLine(example),
-			oneLine(group.Fix),
-		)
 	}
-	writer.Flush()
-	fmt.Println()
-	fmt.Println("Use --json for every affected URL and the complete crawl dataset.")
-}
-
-func optsPerformanceExpected(report audit.SiteReport) bool {
-	return report.Performance.Profile != "" || len(report.Performance.Errors) > 0
-}
-
-func groupFindings(findings []audit.Finding) []issueGroup {
-	grouped := map[string]*issueGroup{}
-	for _, finding := range findings {
-		key := finding.Priority + "\x00" + finding.Category + "\x00" + finding.Check + "\x00" + finding.Fix
-		if grouped[key] == nil {
-			grouped[key] = &issueGroup{
-				Priority: finding.Priority,
-				Category: finding.Category,
-				Check:    finding.Check,
-				Fix:      finding.Fix,
-			}
-		}
-		grouped[key].Items = append(grouped[key].Items, finding)
-	}
-	result := make([]issueGroup, 0, len(grouped))
-	for _, group := range grouped {
-		result = append(result, *group)
-	}
-	priority := map[string]int{"high": 0, "medium": 1, "low": 2}
-	sort.Slice(result, func(i, j int) bool {
-		if priority[result[i].Priority] != priority[result[j].Priority] {
-			return priority[result[i].Priority] < priority[result[j].Priority]
-		}
-		if result[i].Category != result[j].Category {
-			return result[i].Category < result[j].Category
-		}
-		return result[i].Check < result[j].Check
+	report, err := audit.NewClient(opts.timeout).Audit(command.Context(), rawURL, audit.Options{
+		Limit:            opts.limit,
+		CheckExternal:    opts.checkExternal,
+		CheckPerformance: opts.performance,
+		Progress:         crawlProgress,
 	})
-	return result
+	if err != nil {
+		return err
+	}
+
+	searchData, err := opts.loadSearchData(command, searchClient, report.StartURL)
+	if err != nil {
+		return err
+	}
+	output := command.OutOrStdout()
+	if opts.json {
+		return printJSON(output, completeReport{SiteReport: report, SearchData: searchData})
+	}
+	printReport(output, report, searchData)
+	return nil
 }
 
-func printJSON(value any) error {
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(value)
-}
-
-func oneLine(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+func (opts options) loadSearchData(command *cobra.Command, client *dataforseo.Client, startURL string) (*dataforseo.Report, error) {
+	if client == nil {
+		return nil, nil
+	}
+	target, err := domainTarget(startURL)
+	if err != nil {
+		return nil, err
+	}
+	var progress func(string, string)
+	if opts.verbose {
+		progress = func(dataset, message string) {
+			fmt.Fprintf(command.ErrOrStderr(), "[dataforseo:%s] %s\n", dataset, message)
+		}
+	}
+	report := client.Audit(command.Context(), dataforseo.Options{
+		Target:   target,
+		Location: opts.location,
+		Language: opts.language,
+		Limit:    opts.dataLimit,
+		Progress: progress,
+	})
+	return &report, nil
 }

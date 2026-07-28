@@ -299,7 +299,7 @@ func selectPerformancePages(pages []PageReport, limit int) []string {
 	sections := map[string]*performanceSection{}
 	root := ""
 	for _, candidate := range pages {
-		if !candidate.Indexable || candidate.StatusCode < 200 || candidate.StatusCode >= 300 || !strings.Contains(strings.ToLower(candidate.ContentType), "html") {
+		if !candidate.Indexable || candidate.StatusCode < 200 || candidate.StatusCode >= 300 || !isHTMLContent(candidate.ContentType) {
 			continue
 		}
 		parsed, err := url.Parse(candidate.FinalURL)
@@ -353,15 +353,7 @@ func selectPerformancePages(pages []PageReport, limit int) []string {
 func performanceFindings(page PerformancePageReport) []Finding {
 	var findings []Finding
 	add := func(check, priority, evidence, fix string) {
-		findings = append(findings, Finding{
-			Category: "performance",
-			Check:    check,
-			Status:   Warn,
-			Priority: priority,
-			URL:      page.URL,
-			Evidence: evidence,
-			Fix:      fix,
-		})
+		findings = append(findings, newFinding("performance", check, Warn, priority, page.URL, evidence, fix))
 	}
 	if page.LCPMilliseconds > 2500 {
 		priority := "medium"

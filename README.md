@@ -1,6 +1,6 @@
 # seo-audit
 
-`seoaudit` is a Go CLI for deep technical and on-page SEO audits using only information published by the target website.
+`seoaudit` is a Go CLI for deep technical and on-page SEO audits. Its default audit uses only information published by the target website. An explicitly enabled DataForSEO stage adds external search-market and backlink observations.
 
 ## Run an audit
 
@@ -46,6 +46,30 @@ Disable the slower browser performance stage when you only need the HTTP and HTM
 seoaudit audit https://example.com --performance=false
 ```
 
+Add ranked keywords, keyword research, organic competitors, backlinks, referring domains, and DataForSEO authority metrics:
+
+```sh
+seoaudit audit https://example.com \
+  --dataforseo \
+  --location "United Kingdom" \
+  --language en
+```
+
+This makes seven paid live API requests. The report includes the exact provider cost returned by DataForSEO. Results are capped at 25 rows per dataset by default:
+
+```sh
+seoaudit audit https://example.com --dataforseo --data-limit 50
+```
+
+Set the DataForSEO API login and API password in the environment:
+
+```sh
+export DATAFORSEO_USERNAME="your-api-login"
+export DATAFORSEO_PASSWORD="your-api-password"
+```
+
+DataForSEO uses HTTP Basic Authentication rather than a single bearer API key. Obtain these API credentials from the DataForSEO API Access dashboard. The API password is separate from the account password. Credentials are never written into an audit report.
+
 ## Coverage
 
 - HTTP statuses, HTTPS, redirects, redirect chains, response type, size, and timing
@@ -66,12 +90,18 @@ seoaudit audit https://example.com --performance=false
 - HTML page URL casing, underscores, parameters, and excessive length
 - Representative mobile lab performance: FCP, LCP, CLS, TBT, TTFB, DOM/load timing, requests, transfer size, JavaScript/CSS/image weight, third-party requests, DOM size, image dimensions, and offscreen lazy loading
 - Content review signals: editorial article author and date evidence, long-form sourcing, subheading use, and paragraph readability
+- Optional DataForSEO domain visibility: ranking distribution, estimated traffic, and ranking movement
+- Optional DataForSEO keyword research: ranked terms and domain-relevant keyword ideas with volume, difficulty, CPC, and intent when available
+- Optional DataForSEO organic competitors by observed keyword overlap
+- Optional DataForSEO backlink index: provider rank and spam metrics, backlink totals, referring domains, and top live backlink URLs
 
 See [`docs/roadmap.md`](docs/roadmap.md) for planned Lighthouse, content, trust, and authority coverage.
 
 ## Boundaries
 
-The audit reports public, observable evidence and labels heuristics as review items. It does not claim access to Google index state, rankings, traffic, keyword demand, backlinks, conversions, Core Web Vitals field data, or AI citations.
+The default audit reports public, observable evidence and labels heuristics as review items. It does not claim access to Google index state, rankings, traffic, keyword demand, backlinks, conversions, Core Web Vitals field data, or AI citations.
+
+DataForSEO results are external provider observations and estimates. Ranking snapshots, search volume, estimated traffic, backlink coverage, rank, and spam metrics are not Google first-party measurements or ranking guarantees. Google Search Console remains the source for a site's actual Google clicks and impressions.
 
 The crawler analyses server-returned HTML and automatically uses local Chrome for pages that expose very little raw content. Performance results are reproducible lab diagnostics under a simulated mobile profile, not Chrome User Experience Report field data or a Google ranking guarantee. INP requires real interaction data and is therefore not invented by the lab audit; TBT is reported as its development-time proxy.
 

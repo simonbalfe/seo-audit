@@ -46,6 +46,6 @@ New coverage should remain public-site-only, explainable, bounded, and useful to
 - PageSpeed Insights and CrUX for real-user Core Web Vitals when public field data exists.
 - Search Console for queries, impressions, indexing evidence, and content decay.
 - An optional LLM review for intent satisfaction, originality, clarity, and expertise.
-- Backlink and ranking data only through an explicitly configured external data source.
+- DataForSEO rankings, keyword research, competitors, backlinks, referring domains, and provider authority metrics are available through the explicit `--dataforseo` flag.
 
 The default audit will continue to work without accounts, a database, or paid SEO providers.
