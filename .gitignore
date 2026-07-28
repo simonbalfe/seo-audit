@@ -1,0 +1,4 @@
+/seoaudit
+/dist/
+*.out
+.DS_Store
