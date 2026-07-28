@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -107,6 +108,14 @@ func (c *Client) Audit(ctx context.Context, rawURL string, options Options) (Sit
 		seen[item.URL] = true
 		crawlOne(item)
 	}
+	if len(report.Pages) == 0 {
+		for _, finding := range report.Findings {
+			if finding.Check == "Fetch failed" {
+				return SiteReport{}, fmt.Errorf("could not fetch start URL: %s", finding.Evidence)
+			}
+		}
+		return SiteReport{}, errors.New("could not fetch any public URLs")
+	}
 	report.LimitReached = len(queue) > 0 || missingSitemapURLs(sitemapSet, seen) > 0
 	analyzeSite(&report)
 	report.Resources = c.checkResources(ctx, report, options.CheckExternal)
@@ -164,10 +173,14 @@ func analyzeSite(report *SiteReport) {
 	analyzeLinks(report, pageByURL)
 	analyzeDuplicates(report)
 	analyzeHreflang(report, pageByURL)
-	if report.Robots.StatusCode != 200 {
+	if report.Robots.StatusCode == 0 || report.Robots.StatusCode == http.StatusTooManyRequests || report.Robots.StatusCode >= 500 {
 		addSiteFinding(report, "crawlability", "Robots.txt unavailable", Warn, "medium", report.Robots.URL, fmt.Sprintf("HTTP %d", report.Robots.StatusCode), "Return a valid robots.txt or an intentional 404 without blocking crawlers.")
 	}
 	for _, sitemapErr := range report.Sitemaps.Errors {
+		if strings.Contains(sitemapErr, "/sitemap.xml returned 404") && len(report.Sitemaps.Sources) == 1 {
+			addSiteFinding(report, "sitemap", "No XML sitemap found", Warn, "medium", "", sitemapErr, "Add an XML sitemap when it would help search engines discover canonical URLs.")
+			continue
+		}
 		addSiteFinding(report, "sitemap", "Sitemap error", Fail, "high", "", sitemapErr, "Return valid XML sitemap files.")
 	}
 }

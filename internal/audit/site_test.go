@@ -49,6 +49,18 @@ func TestAuditFindsCrossPageIssues(t *testing.T) {
 	}
 }
 
+func TestAuditReturnsErrorWhenStartURLCannotBeFetched(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {}))
+	target := server.URL
+	server.Close()
+
+	client := NewClient(500 * time.Millisecond)
+	client.Render = false
+	if _, err := client.Audit(context.Background(), target, Options{Limit: 5}); err == nil {
+		t.Fatal("expected an error for an unreachable start URL")
+	}
+}
+
 func writeHTML(writer http.ResponseWriter, title, body string) {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprintf(writer, `<html lang="en"><head><title>%s</title><meta name="description" content="A sufficiently descriptive summary for this useful page and its purpose."><meta name="viewport" content="width=device-width"><link rel="canonical" href=""></head><body><main>%s</main></body></html>`, title, body)
