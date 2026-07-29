@@ -3,6 +3,7 @@ package dataforseo
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,11 +13,15 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/simonbalfe/seo-audit/internal/storage"
 )
 
 const (
-	defaultBaseURL = "https://api.dataforseo.com/v3"
-	DatasetCount   = 7
+	defaultBaseURL       = "https://api.dataforseo.com/v3"
+	DefaultCacheTTL      = 6 * time.Hour
+	SearchDatasetCount   = 4
+	BacklinkDatasetCount = 3
 )
 
 type Client struct {
@@ -24,6 +29,7 @@ type Client struct {
 	BaseURL  string
 	Username string
 	Password string
+	Store    storage.ProviderStore
 }
 
 type apiEnvelope struct {
@@ -67,28 +73,91 @@ func NewClientWithCredentials(username, password string) *Client {
 	}
 }
 
-func (c *Client) Audit(ctx context.Context, options Options) Report {
+func (c *Client) Search(ctx context.Context, options Options) Report {
 	options = normalizeOptions(options)
-	report := Report{
-		Enabled:     true,
-		Source:      "DataForSEO",
-		Target:      options.Target,
-		Location:    options.Location,
-		Language:    options.Language,
-		RetrievedAt: time.Now().UTC(),
-	}
-	jobs := []datasetJob{
+	return c.collect(ctx, options, "search", []datasetJob{
 		c.domainOverview,
 		c.rankedKeywords,
 		c.keywordIdeas,
 		c.competitors,
+	})
+}
+
+func (c *Client) Backlinks(ctx context.Context, options Options) Report {
+	options = normalizeLimit(options)
+	return c.collect(ctx, options, "backlinks", []datasetJob{
 		c.backlinkSummary,
 		c.referringDomains,
 		c.topBacklinks,
+	})
+}
+
+func (c *Client) collect(ctx context.Context, options Options, datasetGroup string, jobs []datasetJob) Report {
+	now := time.Now().UTC()
+	cacheTTL := options.CacheTTL
+	if cacheTTL <= 0 {
+		cacheTTL = DefaultCacheTTL
+	}
+	report := Report{
+		Enabled:           true,
+		Source:            "DataForSEO",
+		DatasetGroup:      datasetGroup,
+		Target:            options.Target,
+		Location:          options.Location,
+		Language:          options.Language,
+		RetrievedAt:       now,
+		RequestedDatasets: len(jobs),
+		Cache: CacheInfo{
+			Enabled:    c.Store != nil,
+			TTLSeconds: int64(cacheTTL / time.Second),
+		},
+	}
+	cacheKey := providerCacheKey(datasetGroup, options)
+	if c.Store != nil && !options.Refresh {
+		entry, found, err := c.Store.LoadCache(ctx, cacheKey, now)
+		if err != nil {
+			report.StorageErrors = append(report.StorageErrors, err.Error())
+			progress(options, "cache", "Cache read failed; requesting live data: "+err.Error())
+		} else if found {
+			effectiveExpiry := entry.FetchedAt.Add(cacheTTL)
+			if entry.ExpiresAt.Before(effectiveExpiry) {
+				effectiveExpiry = entry.ExpiresAt
+			}
+			if !effectiveExpiry.After(now) {
+				progress(options, "cache", "Cached data is older than the requested reuse window; requesting live data")
+			} else {
+				var cached Report
+				if err := json.Unmarshal(entry.ResponseJSON, &cached); err != nil {
+					report.StorageErrors = append(report.StorageErrors, "decode provider cache: "+err.Error())
+					progress(options, "cache", "Cached data could not be decoded; requesting live data")
+				} else {
+					cached.CostUSD = 0
+					cached.LiveCalls = 0
+					cached.RetrievedAt = entry.FetchedAt
+					cached.SnapshotID = 0
+					cached.StorageErrors = nil
+					cached.Cache = CacheInfo{
+						Enabled:               true,
+						Hit:                   true,
+						TTLSeconds:            int64(cacheTTL / time.Second),
+						ExpiresAt:             timePointer(effectiveExpiry),
+						CachedProviderCostUSD: entry.ProviderCostUSD,
+					}
+					progress(options, "cache", fmt.Sprintf("Using cached %s data retrieved at %s; no paid calls made", datasetGroup, entry.FetchedAt.Format(time.RFC3339)))
+					c.saveSnapshot(ctx, options, &cached)
+					return cached
+				}
+			}
+		}
 	}
 	if options.Progress != nil {
-		options.Progress("setup", fmt.Sprintf("Requesting %d external datasets for %s in %s (%s)", len(jobs), options.Target, options.Location, options.Language))
+		message := fmt.Sprintf("Requesting %d %s datasets for %s", len(jobs), datasetGroup, options.Target)
+		if options.Location != "" && options.Language != "" {
+			message += fmt.Sprintf(" in %s (%s)", options.Location, options.Language)
+		}
+		options.Progress("setup", message)
 	}
+	report.LiveCalls = len(jobs)
 	results := make(chan datasetResult, len(jobs))
 	for _, job := range jobs {
 		go func() {
@@ -113,16 +182,122 @@ func (c *Client) Audit(ctx context.Context, options Options) Report {
 	}
 	report.Available = report.SuccessfulCalls > 0
 	report.KeywordIdeas = removeRankedKeywords(report.KeywordIdeas, report.RankedKeywords)
+	if c.Store != nil && report.SuccessfulCalls == len(jobs) {
+		expiresAt := report.RetrievedAt.Add(cacheTTL)
+		report.Cache.ExpiresAt = timePointer(expiresAt)
+		report.Cache.Stored = true
+		responseJSON, err := cacheReportJSON(report)
+		if err != nil {
+			report.Cache.Stored = false
+			report.StorageErrors = append(report.StorageErrors, "encode provider cache: "+err.Error())
+		} else if err := c.Store.SaveCache(ctx, storage.CacheEntry{
+			Key:             cacheKey,
+			Provider:        report.Source,
+			DatasetGroup:    report.DatasetGroup,
+			Target:          report.Target,
+			Location:        report.Location,
+			Language:        report.Language,
+			RowLimit:        options.Limit,
+			ResponseJSON:    responseJSON,
+			FetchedAt:       report.RetrievedAt,
+			ExpiresAt:       expiresAt,
+			ProviderCostUSD: report.CostUSD,
+		}); err != nil {
+			report.Cache.Stored = false
+			report.StorageErrors = append(report.StorageErrors, err.Error())
+			progress(options, "cache", "Cache write failed: "+err.Error())
+		} else {
+			progress(options, "cache", fmt.Sprintf("Cached complete %s data until %s", datasetGroup, expiresAt.Format(time.RFC3339)))
+		}
+	}
+	if c.Store != nil {
+		c.saveSnapshot(ctx, options, &report)
+	}
 	return report
 }
 
+func (c *Client) saveSnapshot(ctx context.Context, options Options, report *Report) {
+	resultJSON, err := json.Marshal(report)
+	if err != nil {
+		report.StorageErrors = append(report.StorageErrors, "encode provider snapshot: "+err.Error())
+		return
+	}
+	id, err := c.Store.SaveSnapshot(ctx, storage.Snapshot{
+		Provider:              report.Source,
+		DatasetGroup:          report.DatasetGroup,
+		Target:                report.Target,
+		Location:              report.Location,
+		Language:              report.Language,
+		RowLimit:              options.Limit,
+		RetrievedAt:           report.RetrievedAt,
+		CacheHit:              report.Cache.Hit,
+		ProviderCostUSD:       report.CostUSD,
+		CachedProviderCostUSD: report.Cache.CachedProviderCostUSD,
+		ResultJSON:            resultJSON,
+	})
+	if err != nil {
+		report.StorageErrors = append(report.StorageErrors, err.Error())
+		progress(options, "storage", "Snapshot write failed: "+err.Error())
+		return
+	}
+	report.SnapshotID = id
+	progress(options, "storage", fmt.Sprintf("Saved provider snapshot %d", id))
+}
+
+func providerCacheKey(datasetGroup string, options Options) string {
+	input := struct {
+		Version      int    `json:"version"`
+		Provider     string `json:"provider"`
+		DatasetGroup string `json:"dataset_group"`
+		Target       string `json:"target"`
+		Location     string `json:"location"`
+		Language     string `json:"language"`
+		Limit        int    `json:"limit"`
+	}{
+		Version:      1,
+		Provider:     "DataForSEO",
+		DatasetGroup: datasetGroup,
+		Target:       options.Target,
+		Location:     options.Location,
+		Language:     options.Language,
+		Limit:        options.Limit,
+	}
+	encoded, _ := json.Marshal(input)
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
+}
+
+func cacheReportJSON(report Report) ([]byte, error) {
+	report.SnapshotID = 0
+	report.StorageErrors = nil
+	return json.Marshal(report)
+}
+
+func progress(options Options, dataset, message string) {
+	if options.Progress != nil {
+		options.Progress(dataset, message)
+	}
+}
+
+func timePointer(value time.Time) *time.Time {
+	return &value
+}
+
 func normalizeOptions(options Options) Options {
+	options.Location = strings.TrimSpace(options.Location)
+	options.Language = strings.TrimSpace(options.Language)
 	if options.Location == "" {
 		options.Location = "United Kingdom"
 	}
 	if options.Language == "" {
 		options.Language = "en"
 	}
+	return normalizeLimit(options)
+}
+
+func normalizeLimit(options Options) Options {
+	options.Target = strings.ToLower(strings.TrimSpace(options.Target))
+	options.Location = strings.TrimSpace(options.Location)
+	options.Language = strings.ToLower(strings.TrimSpace(options.Language))
 	if options.Limit <= 0 {
 		options.Limit = 25
 	}

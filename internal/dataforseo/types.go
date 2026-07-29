@@ -7,12 +7,23 @@ type Options struct {
 	Location string
 	Language string
 	Limit    int
+	CacheTTL time.Duration
+	Refresh  bool
 	Progress func(dataset, message string)
 }
 
 type DatasetError struct {
 	Dataset string `json:"dataset"`
 	Message string `json:"message"`
+}
+
+type CacheInfo struct {
+	Enabled               bool       `json:"enabled"`
+	Hit                   bool       `json:"hit"`
+	Stored                bool       `json:"stored"`
+	TTLSeconds            int64      `json:"ttl_seconds,omitempty"`
+	ExpiresAt             *time.Time `json:"expires_at,omitempty"`
+	CachedProviderCostUSD float64    `json:"cached_provider_cost_usd,omitempty"`
 }
 
 type OrganicMetrics struct {
@@ -113,18 +124,24 @@ type Report struct {
 	Enabled           bool              `json:"enabled"`
 	Available         bool              `json:"available"`
 	Source            string            `json:"source"`
+	DatasetGroup      string            `json:"dataset_group"`
 	Target            string            `json:"target"`
-	Location          string            `json:"location"`
-	Language          string            `json:"language"`
+	Location          string            `json:"location,omitempty"`
+	Language          string            `json:"language,omitempty"`
 	RetrievedAt       time.Time         `json:"retrieved_at"`
 	CostUSD           float64           `json:"cost_usd"`
+	RequestedDatasets int               `json:"requested_datasets"`
 	SuccessfulCalls   int               `json:"successful_calls"`
-	OrganicVisibility OrganicMetrics    `json:"organic_visibility"`
-	RankedKeywords    []RankedKeyword   `json:"ranked_keywords"`
-	KeywordIdeas      []KeywordIdea     `json:"keyword_ideas"`
-	Competitors       []Competitor      `json:"competitors"`
-	BacklinkSummary   BacklinkSummary   `json:"backlink_summary"`
-	ReferringDomains  []ReferringDomain `json:"referring_domains"`
-	TopBacklinks      []Backlink        `json:"top_backlinks"`
+	LiveCalls         int               `json:"live_calls"`
+	Cache             CacheInfo         `json:"cache"`
+	SnapshotID        int64             `json:"snapshot_id,omitempty"`
+	OrganicVisibility OrganicMetrics    `json:"organic_visibility,omitempty"`
+	RankedKeywords    []RankedKeyword   `json:"ranked_keywords,omitempty"`
+	KeywordIdeas      []KeywordIdea     `json:"keyword_ideas,omitempty"`
+	Competitors       []Competitor      `json:"competitors,omitempty"`
+	BacklinkSummary   BacklinkSummary   `json:"backlink_summary,omitempty"`
+	ReferringDomains  []ReferringDomain `json:"referring_domains,omitempty"`
+	TopBacklinks      []Backlink        `json:"top_backlinks,omitempty"`
 	Errors            []DatasetError    `json:"errors,omitempty"`
+	StorageErrors     []string          `json:"storage_errors,omitempty"`
 }

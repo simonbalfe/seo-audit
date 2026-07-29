@@ -1,22 +1,19 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
-
-	"github.com/simonbalfe/seo-audit/internal/audit"
-	"github.com/simonbalfe/seo-audit/internal/dataforseo"
 )
 
 const terminalResultLimit = 10
 
-func printReport(output io.Writer, report audit.SiteReport, searchData *dataforseo.Report) {
+func printReport(output io.Writer, report auditReport) {
 	fmt.Fprintf(output, "SEO audit: %s\n", report.StartURL)
 	fmt.Fprintf(output, "Crawled: %d URLs (%d indexable, %d non-indexable) in %.1fs\n",
 		report.Summary.Pages,
@@ -34,19 +31,60 @@ func printReport(output io.Writer, report audit.SiteReport, searchData *datafors
 	if report.LimitReached {
 		fmt.Fprintln(output, "Warning: crawl limit reached; rerun with a higher --limit for complete coverage.")
 	}
-	if searchData != nil {
-		printSearchSummary(output, *searchData)
-	}
 	fmt.Fprintln(output)
 	printFindings(output, report.Findings)
-	if searchData != nil && searchData.Available {
-		printSearchData(output, *searchData)
-	}
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Use --json for every affected URL and the complete crawl dataset.")
 }
 
-func printPerformanceSummary(output io.Writer, report audit.SiteReport) {
+func printOpportunityReport(output io.Writer, report opportunityReport) {
+	fmt.Fprintf(output, "Search opportunities: %s\n", report.Target)
+	if report.SearchConsole != nil {
+		printGSCSummary(output, *report.SearchConsole)
+	}
+	if report.SearchData != nil {
+		printSearchSummary(output, *report.SearchData)
+	}
+	if report.SearchConsole != nil && report.SearchConsole.Available {
+		printGSCData(output, *report.SearchConsole)
+	}
+	if report.SearchData != nil && report.SearchData.Available {
+		printOpportunityData(output, *report.SearchData)
+	}
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Use --json for every returned row and complete provider evidence.")
+}
+
+func printBacklinkReport(output io.Writer, report providerReport) {
+	fmt.Fprintf(output, "Backlink analysis: %s\n", report.Target)
+	printBacklinkSummary(output, report)
+	if report.Available {
+		printBacklinkData(output, report)
+	}
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Use --json for every returned backlink and complete provider evidence.")
+}
+
+func printGSCSummary(output io.Writer, report gscReport) {
+	fmt.Fprintf(
+		output,
+		"Search Console: %s, %s to %s, %d returned query/page rows\n",
+		report.SiteURL,
+		report.StartDate,
+		report.EndDate,
+		report.Summary.Rows,
+	)
+	fmt.Fprintf(
+		output,
+		"GSC returned dataset: %.0f clicks, %.0f impressions, %.2f%% CTR, %.1f weighted position\n",
+		report.Summary.ReturnedClicks,
+		report.Summary.ReturnedImpressions,
+		report.Summary.ReturnedCTR*100,
+		report.Summary.WeightedPosition,
+	)
+}
+
+func printPerformanceSummary(output io.Writer, report auditReport) {
 	if report.Performance.Available {
 		fmt.Fprintf(
 			output,
@@ -65,19 +103,20 @@ func printPerformanceSummary(output io.Writer, report audit.SiteReport) {
 	}
 }
 
-func printSearchSummary(output io.Writer, report dataforseo.Report) {
+func printSearchSummary(output io.Writer, report providerReport) {
 	fmt.Fprintf(
 		output,
-		"Search data: DataForSEO %s/%s, %d of %d datasets, provider cost $%.6f\n",
+		"Search data: DataForSEO %s/%s, %d of %d datasets, %d live calls, current provider cost $%.6f\n",
 		report.Location,
 		report.Language,
 		report.SuccessfulCalls,
-		dataforseo.DatasetCount,
+		report.RequestedDatasets,
+		report.LiveCalls,
 		report.CostUSD,
 	)
+	printProviderStorageSummary(output, report)
 	if report.Available {
 		visibility := report.OrganicVisibility
-		links := report.BacklinkSummary
 		fmt.Fprintf(
 			output,
 			"Visibility: %d ranking keywords, %.2f estimated monthly visits, %d top-10 rankings\n",
@@ -85,6 +124,24 @@ func printSearchSummary(output io.Writer, report dataforseo.Report) {
 			visibility.EstimatedTraffic,
 			visibility.Position1+visibility.Positions2To3+visibility.Positions4To10,
 		)
+	}
+	for _, datasetErr := range report.Errors {
+		fmt.Fprintf(output, "DataForSEO warning: %s: %s\n", datasetErr.Dataset, datasetErr.Message)
+	}
+}
+
+func printBacklinkSummary(output io.Writer, report providerReport) {
+	fmt.Fprintf(
+		output,
+		"Backlink data: DataForSEO, %d of %d datasets, %d live calls, current provider cost $%.6f\n",
+		report.SuccessfulCalls,
+		report.RequestedDatasets,
+		report.LiveCalls,
+		report.CostUSD,
+	)
+	printProviderStorageSummary(output, report)
+	if report.Available {
+		links := report.BacklinkSummary
 		fmt.Fprintf(
 			output,
 			"Authority signals: DataForSEO rank %d, %d backlinks from %d referring domains, target spam score %d\n",
@@ -99,7 +156,31 @@ func printSearchSummary(output io.Writer, report dataforseo.Report) {
 	}
 }
 
-func printFindings(output io.Writer, findings []audit.Finding) {
+func printProviderStorageSummary(output io.Writer, report providerReport) {
+	if report.Cache.Hit {
+		expiry := ""
+		if report.Cache.ExpiresAt != nil {
+			expiry = ", expires " + report.Cache.ExpiresAt.Format("2006-01-02 15:04 MST")
+		}
+		fmt.Fprintf(
+			output,
+			"Cache: hit, source retrieved %s%s, original provider cost $%.6f\n",
+			report.RetrievedAt.Format("2006-01-02 15:04 MST"),
+			expiry,
+			report.Cache.CachedProviderCostUSD,
+		)
+	} else if report.Cache.Stored && report.Cache.ExpiresAt != nil {
+		fmt.Fprintf(output, "Cache: stored until %s\n", report.Cache.ExpiresAt.Format("2006-01-02 15:04 MST"))
+	}
+	if report.SnapshotID > 0 {
+		fmt.Fprintf(output, "Snapshot: SQLite row %d\n", report.SnapshotID)
+	}
+	for _, storageErr := range report.StorageErrors {
+		fmt.Fprintf(output, "Storage warning: %s\n", storageErr)
+	}
+}
+
+func printFindings(output io.Writer, findings []auditFinding) {
 	groups := groupFindings(findings)
 	if len(groups) == 0 {
 		fmt.Fprintln(output, "No deterministic issues found in the public crawl.")
@@ -124,7 +205,7 @@ func printFindings(output io.Writer, findings []audit.Finding) {
 	_ = writer.Flush()
 }
 
-func printSearchData(output io.Writer, report dataforseo.Report) {
+func printOpportunityData(output io.Writer, report providerReport) {
 	if len(report.RankedKeywords) > 0 {
 		writer := startTable(output, "Top ranking keywords", "POS\tKEYWORD\tVOLUME\tDIFFICULTY\tINTENT\tURL")
 		for _, item := range first(report.RankedKeywords, terminalResultLimit) {
@@ -164,6 +245,9 @@ func printSearchData(output io.Writer, report dataforseo.Report) {
 		}
 		_ = writer.Flush()
 	}
+}
+
+func printBacklinkData(output io.Writer, report providerReport) {
 	if len(report.ReferringDomains) > 0 {
 		writer := startTable(output, "Top referring domains", "DOMAIN\tDFS RANK\tBACKLINKS\tNOFOLLOW PAGES")
 		for _, item := range first(report.ReferringDomains, terminalResultLimit) {
@@ -194,6 +278,35 @@ func printSearchData(output io.Writer, report dataforseo.Report) {
 	}
 }
 
+func printGSCData(output io.Writer, report gscReport) {
+	if len(report.StrikingDistance) > 0 {
+		writer := startTable(output, "Search Console opportunities", "POS\tQUERY\tIMPRESSIONS\tCLICKS\tCTR\tPAGE")
+		for _, item := range first(report.StrikingDistance, terminalResultLimit) {
+			fmt.Fprintf(writer, "%.1f\t%s\t%.0f\t%.0f\t%.2f%%\t%s\n",
+				item.Position,
+				oneLine(item.Query),
+				item.Impressions,
+				item.Clicks,
+				item.CTR*100,
+				item.Page,
+			)
+		}
+		_ = writer.Flush()
+	}
+	if len(report.QueryOverlaps) > 0 {
+		writer := startTable(output, "Observed query overlap", "QUERY\tPAGES\tIMPRESSIONS\tEXAMPLES")
+		for _, item := range first(report.QueryOverlaps, terminalResultLimit) {
+			fmt.Fprintf(writer, "%s\t%d\t%.0f\t%s\n",
+				oneLine(item.Query),
+				len(item.Pages),
+				item.Impressions,
+				strings.Join(first(item.Pages, 2), ", "),
+			)
+		}
+		_ = writer.Flush()
+	}
+}
+
 func startTable(output io.Writer, title, header string) *tabwriter.Writer {
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, title)
@@ -206,7 +319,7 @@ func newTableWriter(output io.Writer) *tabwriter.Writer {
 	return tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
 }
 
-func groupFindings(findings []audit.Finding) []issueGroup {
+func groupFindings(findings []auditFinding) []issueGroup {
 	grouped := map[string]*issueGroup{}
 	for _, finding := range findings {
 		key := finding.Priority + "\x00" + finding.Category + "\x00" + finding.Check + "\x00" + finding.Fix
@@ -243,16 +356,18 @@ func printJSON(output io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
-func oneLine(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+func printRawJSON(output io.Writer, data []byte) error {
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, data, "", "  "); err != nil {
+		return fmt.Errorf("format API response: %w", err)
+	}
+	formatted.WriteByte('\n')
+	_, err := output.Write(formatted.Bytes())
+	return err
 }
 
-func domainTarget(rawURL string) (string, error) {
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Hostname() == "" {
-		return "", fmt.Errorf("cannot determine domain from %q", rawURL)
-	}
-	return strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www."), nil
+func oneLine(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func first[T any](items []T, limit int) []T {

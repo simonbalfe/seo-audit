@@ -1,12 +1,17 @@
 # Roadmap
 
-The CLI keeps one user-facing operation:
+The API separates public auditing from account-backed and paid datasets, while the CLI proxies the same explicit operations:
 
 ```sh
 seoaudit audit https://example.com
+seoaudit opportunities https://example.com --gsc
+seoaudit opportunities https://example.com --dataforseo
+seoaudit backlinks https://example.com --dataforseo
+seoaudit rankings check https://example.com --dataforseo
+seoaudit-api
 ```
 
-New coverage should remain public-site-only, explainable, bounded, and useful to someone who does not work in SEO.
+New coverage should remain explainable, bounded, and useful to someone who does not work in SEO. Account-backed and paid sources remain explicit and retain their source semantics.
 
 ## Current: content and trust foundations
 
@@ -44,8 +49,12 @@ New coverage should remain public-site-only, explainable, bounded, and useful to
 ## Optional integrations
 
 - PageSpeed Insights and CrUX for real-user Core Web Vitals when public field data exists.
-- Search Console for queries, impressions, indexing evidence, and content decay.
+- Expand the current Search Console query/page integration with bounded URL Inspection and period-over-period content decay.
 - An optional LLM review for intent satisfaction, originality, clarity, and expertise.
-- DataForSEO rankings, keyword research, competitors, backlinks, referring domains, and provider authority metrics are available through the explicit `--dataforseo` flag.
+- DataForSEO rankings, keyword research, and competitors are available under `opportunities --dataforseo`.
+- DataForSEO backlinks, referring domains, and provider authority metrics are available under `backlinks --dataforseo`.
+- Manual DataForSEO rank tracking with normalized SQLite history is available under `rankings`; queued scheduled checks remain planned.
 
-The default audit will continue to work without accounts, a database, or paid SEO providers.
+The public audit will continue to work without accounts or paid SEO providers and will not persist a report unless explicitly requested.
+
+DataForSEO operations use a bounded local SQLite cache and snapshot history owned by the API. Rank tracking adds normalized keyword/device history for direct comparisons. The local dashboard reads these records plus explicitly saved audit and Search Console snapshots without changing the default public audit contract.

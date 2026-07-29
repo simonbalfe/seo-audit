@@ -1,4 +1,7 @@
 /seoaudit
+/seoaudit-api
 /dist/
+/dashboard/node_modules/
+.seoaudit/
 *.out
 .DS_Store

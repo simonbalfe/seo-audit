@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/simonbalfe/seo-audit/internal/storage"
 )
 
 func TestNewClientReadsEnvironmentCredentials(t *testing.T) {
@@ -33,7 +37,7 @@ func TestNewClientRequiresEnvironmentCredentials(t *testing.T) {
 	}
 }
 
-func TestAuditCollectsExternalSearchData(t *testing.T) {
+func TestSearchAndBacklinksCollectTheirDatasets(t *testing.T) {
 	results := map[string]any{
 		"/v3/dataforseo_labs/google/domain_rank_overview/live": []any{
 			map[string]any{"items": []any{map[string]any{"metrics": map[string]any{"organic": map[string]any{
@@ -143,35 +147,57 @@ func TestAuditCollectsExternalSearchData(t *testing.T) {
 
 	client := NewClientWithCredentials("user", "pass")
 	client.BaseURL = server.URL + "/v3"
-	report := client.Audit(context.Background(), Options{
+	searchReport := client.Search(context.Background(), Options{
 		Target:   "example.com",
 		Location: "United Kingdom",
 		Language: "en",
 		Limit:    10,
 	})
 
-	if requests.Load() != DatasetCount || report.SuccessfulCalls != DatasetCount || !report.Available {
-		t.Fatalf("unexpected call summary: requests=%d success=%d available=%t", requests.Load(), report.SuccessfulCalls, report.Available)
+	if requests.Load() != SearchDatasetCount || searchReport.SuccessfulCalls != SearchDatasetCount || !searchReport.Available {
+		t.Fatalf("unexpected search call summary: requests=%d success=%d available=%t", requests.Load(), searchReport.SuccessfulCalls, searchReport.Available)
 	}
-	if report.CostUSD < 0.069 || report.CostUSD > 0.071 {
-		t.Fatalf("unexpected cost: %f", report.CostUSD)
+	if searchReport.CostUSD < 0.039 || searchReport.CostUSD > 0.041 {
+		t.Fatalf("unexpected search cost: %f", searchReport.CostUSD)
 	}
-	if report.OrganicVisibility.Keywords != 12 || len(report.RankedKeywords) != 1 || report.RankedKeywords[0].Position != 8 {
-		t.Fatalf("unexpected organic data: %#v %#v", report.OrganicVisibility, report.RankedKeywords)
+	if searchReport.DatasetGroup != "search" || searchReport.RequestedDatasets != SearchDatasetCount {
+		t.Fatalf("unexpected search metadata: %#v", searchReport)
 	}
-	if len(report.KeywordIdeas) != 1 || report.KeywordIdeas[0].Keyword != "website seo checker" {
-		t.Fatalf("unexpected keyword ideas: %#v", report.KeywordIdeas)
+	if searchReport.OrganicVisibility.Keywords != 12 || len(searchReport.RankedKeywords) != 1 || searchReport.RankedKeywords[0].Position != 8 {
+		t.Fatalf("unexpected organic data: %#v %#v", searchReport.OrganicVisibility, searchReport.RankedKeywords)
 	}
-	if len(report.Competitors) != 1 || report.Competitors[0].Domain != "competitor.example" {
-		t.Fatalf("unexpected competitors: %#v", report.Competitors)
+	if len(searchReport.KeywordIdeas) != 1 || searchReport.KeywordIdeas[0].Keyword != "website seo checker" {
+		t.Fatalf("unexpected keyword ideas: %#v", searchReport.KeywordIdeas)
 	}
-	if report.BacklinkSummary.DataForSEORank != 51 || len(report.ReferringDomains) != 1 || len(report.TopBacklinks) != 1 {
-		t.Fatalf("unexpected backlink data: %#v %#v %#v", report.BacklinkSummary, report.ReferringDomains, report.TopBacklinks)
+	if len(searchReport.Competitors) != 1 || searchReport.Competitors[0].Domain != "competitor.example" {
+		t.Fatalf("unexpected competitors: %#v", searchReport.Competitors)
+	}
+	if searchReport.BacklinkSummary.Backlinks != 0 || len(searchReport.ReferringDomains) != 0 || len(searchReport.TopBacklinks) != 0 {
+		t.Fatalf("search report contains backlink data: %#v", searchReport)
+	}
+
+	backlinkReport := client.Backlinks(context.Background(), Options{Target: "example.com", Limit: 10})
+	if requests.Load() != SearchDatasetCount+BacklinkDatasetCount || backlinkReport.SuccessfulCalls != BacklinkDatasetCount || !backlinkReport.Available {
+		t.Fatalf("unexpected backlink call summary: requests=%d success=%d available=%t", requests.Load(), backlinkReport.SuccessfulCalls, backlinkReport.Available)
+	}
+	if backlinkReport.CostUSD < 0.029 || backlinkReport.CostUSD > 0.031 {
+		t.Fatalf("unexpected backlink cost: %f", backlinkReport.CostUSD)
+	}
+	if backlinkReport.DatasetGroup != "backlinks" || backlinkReport.RequestedDatasets != BacklinkDatasetCount {
+		t.Fatalf("unexpected backlink metadata: %#v", backlinkReport)
+	}
+	if backlinkReport.BacklinkSummary.DataForSEORank != 51 || len(backlinkReport.ReferringDomains) != 1 || len(backlinkReport.TopBacklinks) != 1 {
+		t.Fatalf("unexpected backlink data: %#v %#v %#v", backlinkReport.BacklinkSummary, backlinkReport.ReferringDomains, backlinkReport.TopBacklinks)
+	}
+	if backlinkReport.OrganicVisibility.Keywords != 0 || len(backlinkReport.RankedKeywords) != 0 || len(backlinkReport.KeywordIdeas) != 0 {
+		t.Fatalf("backlink report contains search data: %#v", backlinkReport)
 	}
 }
 
-func TestAuditPreservesDatasetErrors(t *testing.T) {
+func TestSearchPreservesDatasetErrors(t *testing.T) {
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
 		status := 20000
 		message := "Ok."
 		result := []any{}
@@ -193,12 +219,103 @@ func TestAuditPreservesDatasetErrors(t *testing.T) {
 
 	client := NewClientWithCredentials("user", "pass")
 	client.BaseURL = server.URL + "/v3"
-	report := client.Audit(context.Background(), Options{Target: "example.com"})
+	store, err := storage.OpenSQLite(filepath.Join(t.TempDir(), "partial.db"), 10)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+	client.Store = store
+	report := client.Search(context.Background(), Options{Target: "example.com"})
 
-	if report.SuccessfulCalls != 6 || len(report.Errors) != 1 {
+	if report.SuccessfulCalls != 3 || len(report.Errors) != 1 {
 		t.Fatalf("unexpected partial report: success=%d errors=%#v", report.SuccessfulCalls, report.Errors)
 	}
 	if report.Errors[0].Dataset != "keyword-ideas" || !strings.Contains(report.Errors[0].Message, "40501") {
 		t.Fatalf("unexpected dataset error: %#v", report.Errors[0])
+	}
+	if report.Cache.Stored || report.SnapshotID == 0 {
+		t.Fatalf("partial report cache evidence = %#v", report)
+	}
+
+	second := client.Search(context.Background(), Options{Target: "example.com"})
+	if second.Cache.Hit || requests.Load() != SearchDatasetCount*2 {
+		t.Fatalf("partial report was cached: requests=%d report=%#v", requests.Load(), second)
+	}
+}
+
+func TestSearchCachesCompleteReportsAndStoresSnapshots(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"status_code": 20000,
+			"tasks": []any{map[string]any{
+				"status_code": 20000,
+				"cost":        0.01,
+				"result":      []any{},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	store, err := storage.OpenSQLite(filepath.Join(t.TempDir(), "provider.db"), 10)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	client := NewClientWithCredentials("user", "pass")
+	client.BaseURL = server.URL
+	client.Store = store
+	options := Options{
+		Target:   "Example.COM",
+		Location: "United Kingdom",
+		Language: "EN",
+		Limit:    10,
+		CacheTTL: time.Hour,
+	}
+
+	first := client.Search(context.Background(), options)
+	if requests.Load() != SearchDatasetCount {
+		t.Fatalf("first request count = %d, want %d", requests.Load(), SearchDatasetCount)
+	}
+	if first.Cache.Hit || !first.Cache.Stored || first.LiveCalls != SearchDatasetCount || first.SnapshotID == 0 {
+		t.Fatalf("unexpected first cache evidence: %#v", first)
+	}
+	if first.CostUSD < 0.039 || first.CostUSD > 0.041 {
+		t.Fatalf("first current provider cost = %f", first.CostUSD)
+	}
+
+	second := client.Search(context.Background(), options)
+	if requests.Load() != SearchDatasetCount {
+		t.Fatalf("cached request made new provider calls: %d", requests.Load())
+	}
+	if !second.Cache.Hit || second.LiveCalls != 0 || second.CostUSD != 0 || second.SnapshotID == 0 {
+		t.Fatalf("unexpected cached report: %#v", second)
+	}
+	if second.Cache.CachedProviderCostUSD < 0.039 || second.Cache.CachedProviderCostUSD > 0.041 {
+		t.Fatalf("cached original provider cost = %f", second.Cache.CachedProviderCostUSD)
+	}
+	if second.SnapshotID == first.SnapshotID {
+		t.Fatalf("cache hit reused snapshot id %d", second.SnapshotID)
+	}
+
+	changedLimit := options
+	changedLimit.Limit = 11
+	third := client.Search(context.Background(), changedLimit)
+	if requests.Load() != SearchDatasetCount*2 || third.Cache.Hit {
+		t.Fatalf("changed inputs did not miss cache: requests=%d report=%#v", requests.Load(), third)
+	}
+
+	refreshed := client.Search(context.Background(), Options{
+		Target:   options.Target,
+		Location: options.Location,
+		Language: options.Language,
+		Limit:    options.Limit,
+		CacheTTL: options.CacheTTL,
+		Refresh:  true,
+	})
+	if requests.Load() != SearchDatasetCount*3 || refreshed.Cache.Hit {
+		t.Fatalf("refresh did not bypass cache: requests=%d report=%#v", requests.Load(), refreshed)
 	}
 }
