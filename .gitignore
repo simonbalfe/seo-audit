@@ -1,7 +1,9 @@
 /seoaudit
-/seoaudit-api
+/output/
+/tmp/
+/.playwright-cli/
 /dist/
 /dashboard/node_modules/
-.seoaudit/
+.env
 *.out
 .DS_Store

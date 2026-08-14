@@ -1,112 +1,118 @@
-# Audit Coverage
+# Local SEO Audit Checklist
 
-The public audit follows this priority order:
+Status:
 
-1. crawlability and indexability;
-2. response and canonical integrity;
-3. page titles, descriptions, headings, and visible content;
-4. internal links, crawl depth, duplication, and sitemap consistency;
-5. content clarity, article trust signals, and long-form readability;
-6. images, resources, schema syntax, hreflang, mobile basics, and public AI crawler access.
+- **Yes**: implemented and included in the audit.
+- **Optional**: implemented only when its flag is used.
+- **No**: not implemented.
 
-## Evidence policy
+## Business and Google profile
 
-- Every finding must name the affected URL and observable evidence.
-- Missing optional markup is not automatically an SEO failure.
-- Character lengths, word counts, depth, image size, and similarity are heuristics for review rather than ranking rules.
-- Structured data syntax does not prove Google rich-result eligibility.
-- A sitemap URL is expected to be successful, canonical, and indexable.
-- A URL found only in a sitemap is an orphan candidate, not proof that no link exists anywhere.
-- Deliberate `noindex` directives remain visible in each page's indexability evidence but are not standalone action items. A noindexed sitemap URL is still a failure.
-- Page URL-format heuristics apply to HTML documents, not public assets whose filenames follow an external convention.
-- Verbose mode streams API job events for robots, sitemap, page crawl, analysis, and linked-resource progress to stderr. It does not change audit coverage or JSON stdout.
-- Local Chrome tests the homepage plus one page from each of the largest indexable path sections, capped at six pages per audit.
-- Performance uses a simulated mobile viewport, CPU slowdown, network throttling, disabled cache, and an isolated tab per measured page.
-- Lab performance includes FCP, LCP, CLS, observed TBT, TTFB, page milestones, transfer/request weight, DOM size, and rendered-image diagnostics.
-- INP is field-only in this context. The audit reports TBT as a lab proxy and does not claim Core Web Vitals field compliance.
-- Content review checks cover author and date signals on editorial articles, external sourcing on long articles, subheading use, and unusually long paragraphs.
-- Content review findings are low-priority prompts for human review. They are not claims that a page is unhelpful or unable to rank.
-- `audit --save` asks the API to store the completed JSON report for the local dashboard. Without that explicit flag, the public audit does not read or write audit snapshots.
+| Check | Status |
+|---|---|
+| Resolve the exact Google Place ID and public website, with an explicit `--website` override for an unlinked GBP | Yes |
+| Record business name, category, address, phone, website, status, hours, rating, reviews, photos, and Maps URL | Yes |
+| Verify that the profile and website represent the same business | Yes |
+| Flag missing public profile fields | Yes |
+| Compare primary and secondary categories with competitors | No |
+| Check description, services, products, posts, questions, links, and attributes | No |
+| Check special hours, service areas, and storefront settings | No |
+| Compare photo and video coverage with competitors | No |
+| Detect duplicate or conflicting profiles | No |
 
-## Public-only limitations
+## Keywords, rankings, and competitors
 
-- Google-selected canonicals and real index status require Search Console.
-- Core Web Vitals field data requires CrUX or PageSpeed data.
-- Search demand, rankings, backlinks, and conversions cannot be inferred from the website alone.
-- Sparse client-rendered pages are automatically rendered with local Chrome when available.
-- JavaScript changes on otherwise content-rich pages can still require separate raw-versus-rendered validation.
-- Search intent, originality, factual accuracy, expertise, and comparative content quality require human or explicitly enabled model review.
+| Check | Status |
+|---|---|
+| Discover commercial keyword ideas from the website and GBP category | Yes |
+| Generate bounded commercial keyword seeds from crawled page metadata | Yes |
+| Pull and save existing UK organic rankings before new keyword research | Yes |
+| Accept supplied keywords and retrieve volume and CPC | Yes |
+| Remove branded, informational, irrelevant, and duplicate ideas | Yes |
+| Recheck priority existing keywords at the GBP location in organic search | Yes |
+| Recheck the same keywords in Maps by exact Place ID | Yes |
+| Keep current visibility separate from new keyword opportunities | Yes |
+| Collect nearby Maps competitors, categories, ratings, reviews, URLs, and coordinates | Yes |
+| Select up to five non-brand, validated keywords across distinct commercial pages for the Maps grid | Yes |
+| Measure a 3x3 Maps rank grid and report checked points, failed points, median rank, and coverage | Yes |
+| Create prioritised opportunities from weak organic and Maps visibility | Yes |
+| Collect organic competitors from the same search results | No |
+| Compare the business directly with profiles ranking above it | No |
+| Support custom grid density and service-area shapes | No |
 
-## Search opportunity data
+## Website relevance and conversion
 
-`seoaudit opportunities <url> --dataforseo` adds four direct DataForSEO REST datasets:
+| Check | Status |
+|---|---|
+| Classify every crawled page by purpose during visibility research | Yes |
+| Cache unchanged AI page research | Yes |
+| Identify priority commercial pages and map validated keywords to them | Yes |
+| Detect phone and booking actions on ranking pages | Yes |
+| Map services and target locations to dedicated pages | No |
+| Check local intent in titles, headings, copy, and internal links | No |
+| Check local proof, directions, parking, accessibility, and service-area content | No |
+| Compare name, address, phone, hours, categories, and services across GBP, website, and schema | No |
+| Confirm the GBP website URL is live, canonical, indexable, and points to the right location page | No |
+| Validate rendered LocalBusiness schema against GBP and visible content | No |
 
-- organic ranking distribution and estimated visibility;
-- ranked keywords and ranking URLs;
-- domain-relevant keyword ideas with demand and competition metrics when available;
-- organic competitors based on keyword overlap;
+## Reputation and authority
 
-The report records source, target, location, language, retrieval time, successful datasets, live-call count, dataset errors, cache evidence, snapshot ID, and the exact provider cost incurred by the current command. External estimates are not presented as Google Search Console or analytics measurements.
+| Check | Status |
+|---|---|
+| Record public rating and review count | Yes |
+| Compare ratings and review counts with ranking competitors | No |
+| Analyse review recency, velocity, replies, and themes | No |
+| Check major citations and name, address, and phone consistency | No |
+| Summarise backlinks, referring domains, nofollow domains, spam score, broken backlinks, and leading countries | Yes |
+| Inspect individual backlinks, local relevance, competitor link gaps, and brand mentions | No |
 
-`seoaudit opportunities <url> --gsc` adds one authenticated, read-only Google Search Analytics request:
+## Technical and on-page SEO
 
-- finalized clicks, impressions, CTR, and average position grouped by query and page;
-- returned-dataset totals and impression-weighted position;
-- query/page rows in observed positions 4–20, sorted by impressions;
-- queries observed against multiple pages in the returned dataset.
+| Check | Status |
+|---|---|
+| HTTP status, redirects, robots.txt, sitemaps, indexability, canonicals, and hreflang | Yes |
+| Broken and redirected internal links, internal nofollow, empty anchors, depth, and sitemap-only pages | Yes |
+| External links and linked resources | Yes |
+| Titles, descriptions, H1s, heading order, thin content, and duplicate content | Yes |
+| Image alt-text coverage and large images | Yes |
+| JSON-LD syntax and discovered schema types | Yes |
+| Mobile lab FCP, LCP, CLS, TBT, TTFB, request count, transfer size, JavaScript, and DOM size | Yes |
+| Standard PageSpeed Insights mobile audit for the homepage | No |
+| Field Core Web Vitals including INP | No |
 
-The request is bounded by a configurable 1–25,000 row limit and a maximum 480-day lookback. The default is 250 rows over 28 days. Search Console can omit anonymized queries and rows beyond its API limits, so returned totals are not represented as complete property totals. Multi-page query observations are candidates for review rather than proof that pages compete with each other. `--save` explicitly retains the returned report for the local dashboard.
+### Performance improvement
 
-## Backlink data
+- Replace the six sequential custom Chrome performance checks with one mobile PageSpeed Insights homepage check.
+- Use the returned Lighthouse metrics and diagnostics instead of maintaining custom metric calculations.
+- Query the CrUX API separately when field data is available. Missing CrUX data is not a failure.
+- Keep Chrome only for rendering JavaScript-dependent pages during the website crawl.
 
-`seoaudit backlinks <url> --dataforseo` adds three direct DataForSEO REST datasets:
+## Reporting
 
-- backlink summary and provider authority signals;
-- highest-ranked referring domains;
-- highest-ranked individual live backlinks.
+| Check | Status |
+|---|---|
+| Prioritised terminal report | Yes |
+| Complete timestamped JSON evidence | Yes |
+| Keyword, organic, Maps, grid, competitor, and opportunity summary | Yes |
+| Provider calls, cost, crawl coverage, and limit status | Yes |
+| Saved page summaries grouped by Place ID | Yes |
+| Local dashboard with full and per-workflow audit runs, parameters, live progress, and logs | Yes |
+| Mark every module as completed, skipped, or unavailable | No |
+| Group repeated issues by unique problem and affected pages | No |
+| Compare audits over time | No |
 
-The backlink operation records provider cost and errors independently. It does not request or charge for keyword, ranking, or competitor datasets.
+## Build next
 
-## Paid-provider persistence
+1. Replace custom Chrome performance checks with one PageSpeed Insights mobile check.
+2. Compare the target profile with competitors ranking above it.
+3. Compare GBP details with website content and LocalBusiness schema.
+4. Add configurable Maps grid density and service-area shapes.
+5. Add review, citation, and competitor backlink-gap checks.
 
-The API owns its local SQLite database. Rank tracker configuration, reports, provider cache entries, and snapshots never pass through the CLI. The public audit and unsaved GSC-only opportunity execution paths do not read or write their report snapshot tables.
+## Boundaries
 
-- Complete DataForSEO reports are cached for six hours by default.
-- The cache key includes provider, dataset group, normalized target, location, language, and row limit.
-- `--cache-ttl` changes the reuse window and `--refresh` forces new paid calls.
-- Cache hits retain the source retrieval time and original provider cost, but report zero live calls and zero current-command provider cost.
-- Every DataForSEO opportunity or backlink invocation writes a JSON snapshot, including cache hits and partial reports.
-- Partial reports are not cached, so a transient dataset failure does not become the reusable result.
-- Snapshot retention is bounded to the latest 100 records for each provider, dataset group, and target.
-- `seoaudit-api --db` or `SEOAUDIT_DB_PATH` overrides the operating-system user configuration path.
-
-## Rank tracking
-
-`seoaudit rankings` provides a separate persisted workflow:
-
-- `add` creates or updates a target/location/language tracker and adds normalized, deduplicated keywords;
-- `remove` stops tracking selected keywords without deleting historical observations;
-- `check --dataforseo` explicitly runs paid Google organic live checks;
-- `report` reads current and previous stored results without paid calls.
-
-Checks are bounded to 100 keywords, desktop and/or mobile, and an organic depth from 10 to 100. DataForSEO requests stop crawling once the target domain or a subdomain is found and restrict target matching to organic results. Each successful keyword/device task stores position, ranking URL, and discovered SERP element types. A null position means the task completed but the target was not found within the configured depth.
-
-Reports classify comparable observations as improved, declined, new, lost, or stable. A newly tracked term without a prior observation is uncompared; a missing result from a partial provider run is not checked and is not described as not ranking. Exact current-run provider cost, task counts, partial errors, and retrieval time remain attached to each run. Retention is bounded to 100 runs per tracker.
-
-Rank checks currently use live DataForSEO requests and run only when explicitly invoked. Automatic scheduling and the lower-cost standard task queue are not implemented.
-
-## Local API and dashboard
-
-`seoaudit-api` starts the localhost-only Go REST API with the embedded Bun, Vite, and React frontend. The separate `seoaudit` executable contains only proxy commands and terminal formatting.
-
-- `GET /api/v1/health` reports server availability.
-- `GET /api/v1/capabilities` reports bounded API limits and whether provider credentials are configured without returning secrets.
-- `POST /api/v1/audits`, `/opportunities`, and `/backlinks` create bounded asynchronous jobs.
-- `GET /api/v1/jobs/{id}`, `/events`, and `/result` expose lifecycle, progress, and complete results; `DELETE /api/v1/jobs/{id}` requests cancellation.
-- `GET`, `POST`, and `PATCH` routes under `/api/v1/rank-trackers` own tracker reads, mutations, and explicit paid checks.
-- `GET /api/v1/sites` lists targets found across saved reports, provider snapshots, and rank trackers.
-- `GET /api/v1/sites/{target}` joins the latest saved audit, GSC, DataForSEO search, backlink, and ranking evidence.
-- API responses never contain provider or Google credentials.
-- The frontend receives dashboard summaries and bounded evidence rows rather than direct SQLite access.
-
-The dashboard UI does not trigger crawls or paid calls. The explicit REST operations own data collection, and the CLI is a light proxy to them. See [`docs/api.md`](api.md) for the complete contract.
+- Public data only. No Search Console, Analytics, CRM, or private GBP access.
+- Rankings and findings use measured evidence.
+- AI routes pages and proposes natural commercial keyword seeds. DataForSEO validates demand and rankings. AI never creates rankings or pass/fail findings.
+- The report identifies opportunities, not ranking guarantees.
+- Crawl and provider limits are listed in the [`README`](../README.md#crawl-limits).

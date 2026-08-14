@@ -5,317 +5,276 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/simonbalfe/seo-audit/internal/storage"
+	"github.com/simonbalfe/seo-audit/internal/report"
 )
 
-func TestNewClientReadsEnvironmentCredentials(t *testing.T) {
-	t.Setenv("DATAFORSEO_USERNAME", "api-login")
-	t.Setenv("DATAFORSEO_PASSWORD", "api-password")
-
-	client, err := NewClient()
-	if err != nil {
-		t.Fatalf("create client: %v", err)
-	}
-	if client.Username != "api-login" || client.Password != "api-password" {
-		t.Fatalf("unexpected credentials: username=%q password=%q", client.Username, client.Password)
-	}
-}
-
-func TestNewClientRequiresEnvironmentCredentials(t *testing.T) {
-	t.Setenv("DATAFORSEO_USERNAME", "")
-	t.Setenv("DATAFORSEO_PASSWORD", "")
-
-	_, err := NewClient()
-	if err == nil || !strings.Contains(err.Error(), "DATAFORSEO_USERNAME and DATAFORSEO_PASSWORD") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestSearchAndBacklinksCollectTheirDatasets(t *testing.T) {
-	results := map[string]any{
-		"/v3/dataforseo_labs/google/domain_rank_overview/live": []any{
-			map[string]any{"items": []any{map[string]any{"metrics": map[string]any{"organic": map[string]any{
-				"count": 12, "etv": 34.5, "estimated_paid_traffic_cost": 90.2,
-				"pos_1": 1, "pos_2_3": 2, "pos_4_10": 3, "pos_11_20": 4, "pos_21_30": 2,
-			}}}}},
-		},
-		"/v3/dataforseo_labs/google/ranked_keywords/live": []any{
-			map[string]any{"items": []any{map[string]any{
-				"keyword_data": map[string]any{
-					"keyword":            "seo audit",
-					"keyword_info":       map[string]any{"search_volume": 1000, "cpc": 4.2},
-					"keyword_properties": map[string]any{"keyword_difficulty": 31},
-					"search_intent_info": map[string]any{"main_intent": "commercial"},
-				},
-				"ranked_serp_element": map[string]any{
-					"last_updated_time": "2026-07-28",
-					"serp_item": map[string]any{
-						"rank_absolute": 8,
-						"url":           "https://example.com/audit",
-						"etv":           20.5,
-						"rank_changes":  map[string]any{"previous_rank_absolute": 11},
-					},
-				},
-			}}},
-		},
-		"/v3/dataforseo_labs/google/keywords_for_site/live": []any{
-			map[string]any{"items": []any{map[string]any{
-				"keyword":            "website seo checker",
-				"keyword_info":       map[string]any{"search_volume": 500, "cpc": 2.5, "competition": 0.4, "competition_level": "MEDIUM"},
-				"keyword_properties": map[string]any{"keyword_difficulty": 22},
-				"search_intent_info": map[string]any{"main_intent": "commercial"},
-			}}},
-		},
-		"/v3/dataforseo_labs/google/competitors_domain/live": []any{
-			map[string]any{"items": []any{
-				map[string]any{
-					"domain":              "example.com",
-					"intersections":       12,
-					"avg_position":        8,
-					"full_domain_metrics": map[string]any{"organic": map[string]any{"count": 12, "etv": 34.5}},
-				},
-				map[string]any{
-					"domain":              "competitor.example",
-					"intersections":       7,
-					"avg_position":        12.5,
-					"full_domain_metrics": map[string]any{"organic": map[string]any{"count": 900, "etv": 1200.5}},
-				},
-			}},
-		},
-		"/v3/backlinks/summary/live": []any{
-			map[string]any{
-				"rank": 51, "backlinks": 80, "backlinks_spam_score": 3, "referring_domains": 10,
-				"referring_main_domains": 9, "referring_pages": 30, "referring_pages_nofollow": 5,
-				"referring_ips": 8, "broken_backlinks": 2, "broken_pages": 1, "crawled_pages": 200,
-				"info": map[string]any{"target_spam_score": 1},
-			},
-		},
-		"/v3/backlinks/referring_domains/live": []any{
-			map[string]any{"items": []any{map[string]any{
-				"domain": "source.example", "rank": 70, "backlinks": 4, "referring_pages": 3,
-				"referring_pages_nofollow": 1, "backlinks_spam_score": 0,
-			}}},
-		},
-		"/v3/backlinks/backlinks/live": []any{
-			map[string]any{"items": []any{map[string]any{
-				"url_from": "https://source.example/page", "domain_from": "source.example",
-				"url_to": "https://example.com/", "anchor": "example", "dofollow": true,
-				"rank": 88, "domain_from_rank": 70, "page_from_status_code": 200, "url_to_status_code": 200,
-			}}},
-		},
-	}
-	var requests atomic.Int32
+func TestMapsAnchorsResultsToTargetBusiness(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requests.Add(1)
-		username, password, ok := request.BasicAuth()
-		if !ok || username != "user" || password != "pass" {
-			t.Errorf("unexpected authorization")
+		if request.URL.Path != "/serp/google/maps/live/advanced" {
+			t.Fatalf("path = %q", request.URL.Path)
 		}
 		var payload []map[string]any
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			t.Errorf("decode request: %v", err)
+			t.Fatal(err)
 		}
-		if len(payload) != 1 || payload[0]["target"] != "example.com" {
-			t.Errorf("unexpected payload: %#v", payload)
+		if got := payload[0]["location_coordinate"]; got != "51.5001000,-0.1202000,15z" {
+			t.Fatalf("location_coordinate = %q", got)
 		}
-		result, exists := results[request.URL.Path]
-		if !exists {
-			http.Error(writer, "unknown endpoint", http.StatusNotFound)
-			return
-		}
-		response := map[string]any{
-			"status_code": 20000,
-			"cost":        0.01,
-			"tasks": []any{map[string]any{
-				"status_code": 20000,
-				"cost":        0.01,
-				"result":      result,
-			}},
+		if got := payload[0]["search_places"]; got != false {
+			t.Fatalf("search_places = %v", got)
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(writer).Encode(response); err != nil {
-			t.Errorf("encode response: %v", err)
-		}
+		_, _ = writer.Write([]byte(`{"status_code":20000,"tasks":[{"status_code":20000,"cost":0.002,"result":[{"items":[{"type":"maps_search","rank_group":1,"title":"Nearby Dental","place_id":"competitor","rating":{"value":4.9,"votes_count":300}},{"type":"maps_search","rank_group":2,"title":"Target Dental","place_id":"target","category":"Dentist","rating":{"value":4.8,"votes_count":200}}]}]}]}`))
 	}))
 	defer server.Close()
 
-	client := NewClientWithCredentials("user", "pass")
-	client.BaseURL = server.URL + "/v3"
-	searchReport := client.Search(context.Background(), Options{
-		Target:   "example.com",
-		Location: "United Kingdom",
-		Language: "en",
-		Limit:    10,
-	})
-
-	if requests.Load() != SearchDatasetCount || searchReport.SuccessfulCalls != SearchDatasetCount || !searchReport.Available {
-		t.Fatalf("unexpected search call summary: requests=%d success=%d available=%t", requests.Load(), searchReport.SuccessfulCalls, searchReport.Available)
-	}
-	if searchReport.CostUSD < 0.039 || searchReport.CostUSD > 0.041 {
-		t.Fatalf("unexpected search cost: %f", searchReport.CostUSD)
-	}
-	if searchReport.DatasetGroup != "search" || searchReport.RequestedDatasets != SearchDatasetCount {
-		t.Fatalf("unexpected search metadata: %#v", searchReport)
-	}
-	if searchReport.OrganicVisibility.Keywords != 12 || len(searchReport.RankedKeywords) != 1 || searchReport.RankedKeywords[0].Position != 8 {
-		t.Fatalf("unexpected organic data: %#v %#v", searchReport.OrganicVisibility, searchReport.RankedKeywords)
-	}
-	if len(searchReport.KeywordIdeas) != 1 || searchReport.KeywordIdeas[0].Keyword != "website seo checker" {
-		t.Fatalf("unexpected keyword ideas: %#v", searchReport.KeywordIdeas)
-	}
-	if len(searchReport.Competitors) != 1 || searchReport.Competitors[0].Domain != "competitor.example" {
-		t.Fatalf("unexpected competitors: %#v", searchReport.Competitors)
-	}
-	if searchReport.BacklinkSummary.Backlinks != 0 || len(searchReport.ReferringDomains) != 0 || len(searchReport.TopBacklinks) != 0 {
-		t.Fatalf("search report contains backlink data: %#v", searchReport)
-	}
-
-	backlinkReport := client.Backlinks(context.Background(), Options{Target: "example.com", Limit: 10})
-	if requests.Load() != SearchDatasetCount+BacklinkDatasetCount || backlinkReport.SuccessfulCalls != BacklinkDatasetCount || !backlinkReport.Available {
-		t.Fatalf("unexpected backlink call summary: requests=%d success=%d available=%t", requests.Load(), backlinkReport.SuccessfulCalls, backlinkReport.Available)
-	}
-	if backlinkReport.CostUSD < 0.029 || backlinkReport.CostUSD > 0.031 {
-		t.Fatalf("unexpected backlink cost: %f", backlinkReport.CostUSD)
-	}
-	if backlinkReport.DatasetGroup != "backlinks" || backlinkReport.RequestedDatasets != BacklinkDatasetCount {
-		t.Fatalf("unexpected backlink metadata: %#v", backlinkReport)
-	}
-	if backlinkReport.BacklinkSummary.DataForSEORank != 51 || len(backlinkReport.ReferringDomains) != 1 || len(backlinkReport.TopBacklinks) != 1 {
-		t.Fatalf("unexpected backlink data: %#v %#v %#v", backlinkReport.BacklinkSummary, backlinkReport.ReferringDomains, backlinkReport.TopBacklinks)
-	}
-	if backlinkReport.OrganicVisibility.Keywords != 0 || len(backlinkReport.RankedKeywords) != 0 || len(backlinkReport.KeywordIdeas) != 0 {
-		t.Fatalf("backlink report contains search data: %#v", backlinkReport)
-	}
-}
-
-func TestSearchPreservesDatasetErrors(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requests.Add(1)
-		status := 20000
-		message := "Ok."
-		result := []any{}
-		if strings.Contains(request.URL.Path, "keywords_for_site") {
-			status = 40501
-			message = "Invalid Field"
-		}
-		_ = json.NewEncoder(writer).Encode(map[string]any{
-			"status_code": 20000,
-			"tasks": []any{map[string]any{
-				"status_code":    status,
-				"status_message": message,
-				"cost":           0.01,
-				"result":         result,
-			}},
-		})
-	}))
-	defer server.Close()
-
-	client := NewClientWithCredentials("user", "pass")
-	client.BaseURL = server.URL + "/v3"
-	store, err := storage.OpenSQLite(filepath.Join(t.TempDir(), "partial.db"), 10)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
-	client.Store = store
-	report := client.Search(context.Background(), Options{Target: "example.com"})
-
-	if report.SuccessfulCalls != 3 || len(report.Errors) != 1 {
-		t.Fatalf("unexpected partial report: success=%d errors=%#v", report.SuccessfulCalls, report.Errors)
-	}
-	if report.Errors[0].Dataset != "keyword-ideas" || !strings.Contains(report.Errors[0].Message, "40501") {
-		t.Fatalf("unexpected dataset error: %#v", report.Errors[0])
-	}
-	if report.Cache.Stored || report.SnapshotID == 0 {
-		t.Fatalf("partial report cache evidence = %#v", report)
-	}
-
-	second := client.Search(context.Background(), Options{Target: "example.com"})
-	if second.Cache.Hit || requests.Load() != SearchDatasetCount*2 {
-		t.Fatalf("partial report was cached: requests=%d report=%#v", requests.Load(), second)
-	}
-}
-
-func TestSearchCachesCompleteReportsAndStoresSnapshots(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requests.Add(1)
-		_ = json.NewEncoder(writer).Encode(map[string]any{
-			"status_code": 20000,
-			"tasks": []any{map[string]any{
-				"status_code": 20000,
-				"cost":        0.01,
-				"result":      []any{},
-			}},
-		})
-	}))
-	defer server.Close()
-
-	store, err := storage.OpenSQLite(filepath.Join(t.TempDir(), "provider.db"), 10)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
-
-	client := NewClientWithCredentials("user", "pass")
+	client := NewClientWithCredentials("user", "password")
 	client.BaseURL = server.URL
-	client.Store = store
-	options := Options{
-		Target:   "Example.COM",
-		Location: "United Kingdom",
-		Language: "EN",
-		Limit:    10,
-		CacheTTL: time.Hour,
-	}
-
-	first := client.Search(context.Background(), options)
-	if requests.Load() != SearchDatasetCount {
-		t.Fatalf("first request count = %d, want %d", requests.Load(), SearchDatasetCount)
-	}
-	if first.Cache.Hit || !first.Cache.Stored || first.LiveCalls != SearchDatasetCount || first.SnapshotID == 0 {
-		t.Fatalf("unexpected first cache evidence: %#v", first)
-	}
-	if first.CostUSD < 0.039 || first.CostUSD > 0.041 {
-		t.Fatalf("first current provider cost = %f", first.CostUSD)
-	}
-
-	second := client.Search(context.Background(), options)
-	if requests.Load() != SearchDatasetCount {
-		t.Fatalf("cached request made new provider calls: %d", requests.Load())
-	}
-	if !second.Cache.Hit || second.LiveCalls != 0 || second.CostUSD != 0 || second.SnapshotID == 0 {
-		t.Fatalf("unexpected cached report: %#v", second)
-	}
-	if second.Cache.CachedProviderCostUSD < 0.039 || second.Cache.CachedProviderCostUSD > 0.041 {
-		t.Fatalf("cached original provider cost = %f", second.Cache.CachedProviderCostUSD)
-	}
-	if second.SnapshotID == first.SnapshotID {
-		t.Fatalf("cache hit reused snapshot id %d", second.SnapshotID)
-	}
-
-	changedLimit := options
-	changedLimit.Limit = 11
-	third := client.Search(context.Background(), changedLimit)
-	if requests.Load() != SearchDatasetCount*2 || third.Cache.Hit {
-		t.Fatalf("changed inputs did not miss cache: requests=%d report=%#v", requests.Load(), third)
-	}
-
-	refreshed := client.Search(context.Background(), Options{
-		Target:   options.Target,
-		Location: options.Location,
-		Language: options.Language,
-		Limit:    options.Limit,
-		CacheTTL: options.CacheTTL,
-		Refresh:  true,
+	snapshot, cost, live, err := client.maps(context.Background(), "dentist near me", Options{
+		Language:        "en",
+		TargetPlaceID:   "target",
+		TargetLatitude:  51.5001,
+		TargetLongitude: -0.1202,
 	})
-	if requests.Load() != SearchDatasetCount*3 || refreshed.Cache.Hit {
-		t.Fatalf("refresh did not bypass cache: requests=%d report=%#v", requests.Load(), refreshed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !live || cost != 0.002 || snapshot.TargetPosition != 2 || len(snapshot.Results) != 2 {
+		t.Fatalf("live=%v cost=%f snapshot=%#v", live, cost, snapshot)
+	}
+	if !snapshot.Results[1].IsTarget || snapshot.Results[0].ReviewCount != 300 {
+		t.Fatalf("results = %#v", snapshot.Results)
+	}
+}
+
+func TestSiteKeywordsRequestsWholeSite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/keywords_data/google_ads/keywords_for_site/live" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		var payload []map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload[0]["target"] != "example.com" || payload[0]["target_type"] != "site" || payload[0]["location_coordinate"] != "51.5001000,-0.1202000" {
+			t.Fatalf("payload = %#v", payload[0])
+		}
+		if _, exists := payload[0]["location_name"]; exists {
+			t.Fatalf("payload should use coordinates: %#v", payload[0])
+		}
+		_, _ = writer.Write([]byte(`{"status_code":20000,"tasks":[{"status_code":20000,"cost":0.075,"result":[{"keyword":"local service","search_volume":100,"cpc":4.2}]}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithCredentials("user", "password")
+	client.BaseURL = server.URL
+	items, cost, live, err := client.siteKeywords(context.Background(), Options{Target: "example.com", Location: "London", Language: "en", TargetLatitude: 51.5001, TargetLongitude: -0.1202})
+	if err != nil || !live || cost != 0.075 || len(items) != 1 || items[0].SearchVolume != 100 {
+		t.Fatalf("items=%#v cost=%f live=%v err=%v", items, cost, live, err)
+	}
+}
+
+func TestRankedKeywordsUsePlaceCountry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload []map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if got := payload[0]["location_name"]; got != "United Kingdom" {
+			t.Fatalf("location_name = %q, want United Kingdom", got)
+		}
+		_, _ = writer.Write([]byte(`{"status_code":20000,"tasks":[{"status_code":20000,"result":[{"items":[]}]}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithCredentials("user", "password")
+	client.BaseURL = server.URL
+	if _, _, _, err := client.ranked(context.Background(), Options{Target: "example.com", Location: "London", TargetCountry: "United Kingdom", Language: "en"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExistingRankingsAreKeptAndPrioritizedForLocalChecks(t *testing.T) {
+	items := make([]rankedItem, 3)
+	items[0].KeywordData.Keyword = "Dental Implants"
+	items[0].KeywordData.KeywordInfo.SearchVolume = 500
+	items[0].RankedSERPElement.SERPItem.RankAbsolute = 55
+	items[0].RankedSERPElement.SERPItem.URL = "https://example.com/"
+	items[1].KeywordData.Keyword = "How Dental Implants Work"
+	items[1].KeywordData.KeywordInfo.SearchVolume = 900
+	items[1].RankedSERPElement.SERPItem.RankAbsolute = 8
+	items[1].RankedSERPElement.SERPItem.URL = "https://example.com/guide/"
+	items[2].KeywordData.Keyword = "Dentist Near Me"
+	items[2].KeywordData.KeywordInfo.SearchVolume = 1000
+	items[2].RankedSERPElement.SERPItem.RankAbsolute = 3
+	items[2].RankedSERPElement.SERPItem.URL = "https://example.com/"
+
+	rankings := existingRankings(items)
+	if len(rankings) != 3 || rankings[0].Keyword != "dentist near me" || rankings[2].Position != 55 {
+		t.Fatalf("existingRankings() = %#v", rankings)
+	}
+	candidates := rankedCandidates(items)
+	if len(candidates) != 2 || candidates[0].keyword != "dental implants" || candidates[0].position != 55 {
+		t.Fatalf("rankedCandidates() = %#v", candidates)
+	}
+	shortlist := shortlistCandidates(append(candidates, candidate{keyword: "new implant idea", source: "openrouter", searchVolume: 5000}), 2)
+	if len(shortlist) != 2 || shortlist[0].source != "current-ranking" || shortlist[1].source != "current-ranking" {
+		t.Fatalf("shortlistCandidates() = %#v", shortlist)
+	}
+	newIdeas := removeExistingCandidates([]candidate{{keyword: "dental implants"}, {keyword: "new implant idea"}}, rankings)
+	if len(newIdeas) != 1 || newIdeas[0].keyword != "new implant idea" {
+		t.Fatalf("removeExistingCandidates() = %#v", newIdeas)
+	}
+}
+
+func TestBacklinksReturnsOneDomainSummary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/backlinks/summary/live" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		var payload []map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if got := payload[0]["target"]; got != "example.com" {
+			t.Fatalf("target = %q", got)
+		}
+		if got := payload[0]["include_subdomains"]; got != true {
+			t.Fatalf("include_subdomains = %v", got)
+		}
+		_, _ = writer.Write([]byte(`{"status_code":20000,"tasks":[{"status_code":20000,"cost":0.024,"result":[{"backlinks":358,"referring_domains":186,"referring_domains_nofollow":123,"referring_pages":338,"referring_ips":93,"rank":170,"backlinks_spam_score":24,"broken_backlinks":8,"broken_pages":5,"referring_links_countries":{"GB":101,"US":23},"info":{"target_spam_score":3}}]}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithCredentials("user", "password")
+	client.BaseURL = server.URL
+	got := client.Backlinks(context.Background(), "https://www.Example.com/path")
+	if got.Error != "" || got.LiveCalls != 1 || got.CostUSD != 0.024 {
+		t.Fatalf("backlink request = %#v", got)
+	}
+	if got.Backlinks != 358 || got.ReferringDomains != 186 || got.BrokenBacklinks != 8 || got.Countries["GB"] != 101 {
+		t.Fatalf("backlink summary = %#v", got)
+	}
+}
+
+func TestSiteCandidatesKeepCommercialNonBrandKeywords(t *testing.T) {
+	items := []volumeItem{
+		{Keyword: "dentist london", SearchVolume: 1000, CPC: 8},
+		{Keyword: "teeth whitening", SearchVolume: 500, CPC: 4},
+		{Keyword: "Whites Dental", SearchVolume: 100, CPC: 2},
+		{Keyword: "how to brush teeth", SearchVolume: 2000, CPC: 1},
+		{Keyword: "dental history", SearchVolume: 100, CPC: 0},
+		{Keyword: "dental surgerys", SearchVolume: 8100, CPC: 4.6},
+	}
+	pages := []report.PageReport{{URL: "https://whitesdental.co.uk/services", Indexable: true, Title: "Dentist and teeth whitening"}}
+	got := siteCandidates(items, pages, Options{Target: "whitesdental.co.uk", TargetName: "Whites Dental Waterloo", TargetCategory: "Dentist", Location: "London,England,United Kingdom"})
+	if len(got) != 2 || got[0].keyword != "dentist london" || got[1].keyword != "teeth whitening" {
+		t.Fatalf("siteCandidates() = %#v", got)
+	}
+	if got[0].source != "site-discovery" || candidateImportance(got[0]) != 5 {
+		t.Fatalf("first candidate = %#v", got[0])
+	}
+}
+
+func TestShortlistPrefersProviderRelevanceForDiscoveredKeywords(t *testing.T) {
+	got := shortlistCandidates([]candidate{
+		{keyword: "high volume phrase", source: "site-discovery", relevance: 20, searchVolume: 10000},
+		{keyword: "closest business phrase", source: "site-discovery", relevance: 1, searchVolume: 100},
+	}, 1)
+	if len(got) != 1 || got[0].keyword != "closest business phrase" {
+		t.Fatalf("shortlistCandidates() = %#v", got)
+	}
+}
+
+func TestOpenRouterKeywordMapsToPriorityCommercialPage(t *testing.T) {
+	pages := []report.PageReport{
+		{
+			FinalURL:     "https://example.com/dental-implants/",
+			Indexable:    true,
+			PriorityPage: true,
+			PageType:     "service",
+			Title:        "Dental Implants",
+			KeywordSeeds: []string{"dental implants london"},
+		},
+		{
+			FinalURL:     "https://example.com/blog/dental-implant-guide/",
+			Indexable:    true,
+			PriorityPage: false,
+			PageType:     "blog",
+			Title:        "Dental Implant Guide",
+		},
+	}
+	got := assignCandidatePages(generatedCandidates([]string{"dental implants london"}, []volumeItem{{Keyword: "dental implants london", SearchVolume: 500, CPC: 8}}), pages)
+	if len(got) != 1 || got[0].url != "" || got[0].targetURL != pages[0].FinalURL || got[0].source != "openrouter" {
+		t.Fatalf("mapped candidate = %#v", got)
+	}
+	opportunity := opportunity(got[0], &pages[0], nil)
+	if opportunity.URL != "" || opportunity.TargetURL != pages[0].FinalURL || len(opportunity.Actions) == 0 || !strings.Contains(opportunity.Actions[0], "matched priority page") {
+		t.Fatalf("opportunity = %#v", opportunity)
+	}
+}
+
+func TestGeoGridAndOpportunitySummariseAreaVisibility(t *testing.T) {
+	points := geoGrid(51.5, -0.12, 2)
+	if len(points) != 9 || points[4].Latitude != 51.5 || points[4].Longitude != -0.12 {
+		t.Fatalf("geoGrid() = %#v", points)
+	}
+	for index := range points {
+		points[index].Position = index + 1
+		points[index].Status = "ranked"
+	}
+	snapshot := report.MapsVisibility{TargetPosition: 2, GridPoints: points}
+	summarizeGrid(&snapshot)
+	if snapshot.TopThreeCoverage != 33.3 || snapshot.FoundCoverage != 100 || snapshot.MedianPosition != 5 {
+		t.Fatalf("grid summary = %#v", snapshot)
+	}
+	got := opportunity(candidate{keyword: "dentist london", source: "site-discovery", searchVolume: 1000}, nil, &snapshot)
+	if got.Priority != "high" || got.Status != "weak-organic-and-maps" || got.MapsTopThreeCoverage != 33.3 {
+		t.Fatalf("opportunity() = %#v", got)
+	}
+}
+
+func TestGridCandidatesPreferExistingNonBrandAndDistinctPages(t *testing.T) {
+	current := []candidate{
+		{keyword: "addison place dentist", searchVolume: 100, url: "https://addisonplace.co.uk/", source: "current-ranking"},
+		{keyword: "dentist w11 4rj", searchVolume: 90, url: "https://addisonplace.co.uk/", source: "current-ranking"},
+		{keyword: "dentist holland park", searchVolume: 80, url: "https://addisonplace.co.uk/", source: "current-ranking"},
+	}
+	opportunities := []candidate{
+		{keyword: "dentist near me", searchVolume: 1000, targetURL: "https://addisonplace.co.uk/"},
+		{keyword: "dental implants london", searchVolume: 500, targetURL: "https://addisonplace.co.uk/services/implants/"},
+		{keyword: "children's dentist london", searchVolume: 300, targetURL: "https://addisonplace.co.uk/services/children/"},
+		{keyword: "braces london", searchVolume: 200, targetURL: "https://addisonplace.co.uk/services/braces/"},
+		{keyword: "facial aesthetics london", searchVolume: 100, targetURL: "https://addisonplace.co.uk/services/facial-aesthetics/"},
+		{keyword: "emergency dentist london", searchVolume: 0, targetURL: "https://addisonplace.co.uk/services/emergency/"},
+	}
+	got := selectGridCandidates(current, opportunities, Options{Target: "addisonplace.co.uk", TargetName: "Addison Place Dental Practice"}, 5)
+	want := []string{"dentist holland park", "dental implants london", "children's dentist london", "braces london", "facial aesthetics london"}
+	if len(got) != len(want) {
+		t.Fatalf("selectGridCandidates() = %#v", got)
+	}
+	for index := range want {
+		if got[index].keyword != want[index] {
+			t.Fatalf("keyword %d = %q, want %q", index, got[index].keyword, want[index])
+		}
+	}
+}
+
+func TestGridSummaryExcludesFailedPoints(t *testing.T) {
+	points := []report.GeoRankPoint{
+		{Position: 1, Status: "ranked"},
+		{Position: 5, Status: "ranked"},
+		{Status: "not_found"},
+	}
+	for range 6 {
+		points = append(points, report.GeoRankPoint{Status: "error", Error: "provider error"})
+	}
+	snapshot := report.MapsVisibility{GridPoints: points}
+	summarizeGrid(&snapshot)
+	if snapshot.GridCheckedPoints != 3 || snapshot.GridFailedPoints != 6 || snapshot.TopThreeCoverage != 33.3 || snapshot.FoundCoverage != 66.7 || snapshot.MedianPosition != 5 {
+		t.Fatalf("grid summary = %#v", snapshot)
 	}
 }

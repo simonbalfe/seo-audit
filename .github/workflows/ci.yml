@@ -12,6 +12,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: dashboard
       - run: go test ./...
       - run: go vet ./...
-      - run: go build ./cmd/seoaudit ./cmd/seoaudit-api
+      - run: go build ./cmd/seoaudit
