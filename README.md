@@ -120,6 +120,8 @@ Each audit:
 The production container runs `seoaudit serve` on the Google Maps VPS,
 Tailscale-only at port 8090, deployed by the leads app's production workflow. It accepts one request at a time:
 
+It resolves the supplied Place ID once, then runs only the DataForSEO visibility scan. It does not crawl the website or call OpenRouter.
+
 ```http
 POST /api/audits
 Content-Type: application/json

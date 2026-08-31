@@ -6,7 +6,7 @@ COPY . ./
 RUN CGO_ENABLED=0 go build -o /seoaudit ./cmd/seoaudit
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates chromium
+RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=build /seoaudit /usr/local/bin/seoaudit
 EXPOSE 8090

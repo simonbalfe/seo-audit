@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/simonbalfe/seo-audit/internal/dataforseo"
+	"github.com/simonbalfe/seo-audit/internal/places"
 	"github.com/simonbalfe/seo-audit/internal/report"
 )
 
@@ -107,23 +108,41 @@ func newAuditServer(run auditRunner) http.Handler {
 }
 
 func runVisibilityAudit(ctx context.Context, placeID string) (report.SiteReport, error) {
-	opts := auditOptions{
-		json:          true,
-		timeout:       30 * time.Second,
-		limit:         50,
-		checkExternal: true,
-		performance:   false,
-		steps:         "visibility",
-	}
-	var output bytes.Buffer
-	if err := opts.run(ctx, &output, io.Discard, placeID); err != nil {
+	started := time.Now()
+	placesClient, err := places.NewClient()
+	if err != nil {
 		return report.SiteReport{}, err
 	}
-	var result report.SiteReport
-	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
-		return report.SiteReport{}, fmt.Errorf("decode audit result: %w", err)
+	profile, err := placesClient.AuditPlace(ctx, placeID)
+	if err != nil {
+		return report.SiteReport{}, err
 	}
-	return result, nil
+	if strings.TrimSpace(profile.Website) == "" {
+		return report.SiteReport{}, errors.New("Google Place has no public website")
+	}
+	dataClient, err := dataforseo.NewClient()
+	if err != nil {
+		return report.SiteReport{}, err
+	}
+	market := dataClient.Scan(ctx, nil, dataforseo.Options{
+		Target:          profile.Website,
+		Location:        profile.Market,
+		Language:        "en",
+		MaxChecks:       5,
+		TargetName:      profile.Name,
+		TargetCategory:  profile.Category,
+		TargetCountry:   profile.Country,
+		TargetPlaceID:   profile.PlaceID,
+		TargetLatitude:  profile.Latitude,
+		TargetLongitude: profile.Longitude,
+		GridRadiusKM:    2,
+	})
+	return report.SiteReport{
+		StartURL: profile.Website,
+		Duration: time.Since(started).Milliseconds(),
+		Market:   market,
+		GBP:      &profile,
+	}, nil
 }
 
 func writeAPIJSON(writer http.ResponseWriter, status int, value any) {
