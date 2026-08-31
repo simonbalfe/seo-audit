@@ -47,6 +47,8 @@ func execute(ctx context.Context, args []string, output, errorOutput io.Writer) 
 	switch args[0] {
 	case "audit":
 		return runAudit(ctx, args[1:], output, errorOutput)
+	case "serve":
+		return runServer(ctx, args[1:], errorOutput)
 	case "help", "-h", "--help":
 		return runAudit(ctx, []string{"--help"}, output, errorOutput)
 	default:

@@ -114,3 +114,17 @@ Each audit:
 - saves complete JSON evidence under `output/` unless `--output` is used;
 - updates `output/audits.sqlite` for the local dashboard;
 - stores cached visibility page research in `classifications.sqlite`.
+
+## Private API
+
+The production container runs `seoaudit serve` on the Google Maps VPS,
+Tailscale-only at port 8090, deployed by the leads app's production workflow. It accepts one request at a time:
+
+```http
+POST /api/audits
+Content-Type: application/json
+
+{"placeId":"ChIJQ-rbABcbcUgRW9BTCMyiHAI"}
+```
+
+It runs the evidence-led visibility audit and returns the full JSON report.

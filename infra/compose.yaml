@@ -1,0 +1,26 @@
+name: seo-audit
+
+services:
+  api:
+    image: seo-audit:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: 4g
+    env_file:
+      - path: ./api.env
+        format: raw
+        required: true
+    environment:
+      SEO_AUDIT_LISTEN_ADDR: 0.0.0.0:8090
+    volumes:
+      - ../data:/app/output
+    ports:
+      - "${TAILSCALE_IP:?TAILSCALE_IP is required}:8090:8090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
