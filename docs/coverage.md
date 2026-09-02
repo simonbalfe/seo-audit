@@ -93,6 +93,7 @@ Status:
 |---|---|
 | Prioritised terminal report | Yes |
 | Complete timestamped JSON evidence | Yes |
+| Client-facing DataForSEO visibility PDF | Yes |
 | Keyword, organic, Maps, grid, competitor, and opportunity summary | Yes |
 | Provider calls, cost, crawl coverage, and limit status | Yes |
 | Saved page summaries grouped by Place ID | Yes |

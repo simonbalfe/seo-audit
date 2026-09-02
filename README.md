@@ -130,3 +130,4 @@ Content-Type: application/json
 ```
 
 It runs the evidence-led visibility audit and returns the full JSON report.
+Send `Accept: application/pdf` to download the same DataForSEO visibility results as a client-facing PDF.

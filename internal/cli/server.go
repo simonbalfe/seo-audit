@@ -15,6 +15,7 @@ import (
 	"github.com/simonbalfe/seo-audit/internal/dataforseo"
 	"github.com/simonbalfe/seo-audit/internal/places"
 	"github.com/simonbalfe/seo-audit/internal/report"
+	"github.com/simonbalfe/seo-audit/internal/reportpdf"
 )
 
 const defaultListenAddress = "0.0.0.0:8090"
@@ -97,12 +98,25 @@ func newAuditServer(run auditRunner) http.Handler {
 			return
 		}
 		defer running.Unlock()
-		report, err := run(request.Context(), input.PlaceID)
+		audit, err := run(request.Context(), input.PlaceID)
 		if err != nil {
 			writeAPIError(writer, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeAPIJSON(writer, http.StatusOK, report)
+		if strings.Contains(request.Header.Get("Accept"), "application/pdf") {
+			output, err := reportpdf.Render(audit)
+			if err != nil {
+				writeAPIError(writer, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writer.Header().Set("Content-Type", "application/pdf")
+			writer.Header().Set("Content-Disposition", `attachment; filename="local-seo-visibility-report.pdf"`)
+			writer.Header().Set("X-Place-ID", input.PlaceID)
+			writer.WriteHeader(http.StatusOK)
+			_, _ = writer.Write(output)
+			return
+		}
+		writeAPIJSON(writer, http.StatusOK, audit)
 	})
 	return mux
 }

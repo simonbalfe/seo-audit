@@ -45,3 +45,25 @@ func TestAuditServerRejectsInvalidRequest(t *testing.T) {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
 	}
 }
+
+func TestAuditServerReturnsPDF(t *testing.T) {
+	handler := newAuditServer(func(_ context.Context, placeID string) (report.SiteReport, error) {
+		return report.SiteReport{GBP: &report.GBPAuditReport{PlaceID: placeID, Name: "Example Dental"}}, nil
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/audits", strings.NewReader(`{"placeId":"place-123"}`))
+	request.Header.Set("Accept", "application/pdf")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if response.Header().Get("Content-Type") != "application/pdf" {
+		t.Fatalf("content type = %q", response.Header().Get("Content-Type"))
+	}
+	if response.Header().Get("X-Place-ID") != "place-123" {
+		t.Fatalf("place ID = %q", response.Header().Get("X-Place-ID"))
+	}
+	if !strings.HasPrefix(response.Body.String(), "%PDF-") {
+		t.Fatal("response is not a PDF")
+	}
+}
